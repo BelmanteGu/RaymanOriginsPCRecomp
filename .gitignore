@@ -1,0 +1,18 @@
+# Everything derived from the game, keys and local captures stays local. Never commit.
+private/
+.venv/
+__pycache__/
+*.pyc
+
+# Game files, wherever they are dropped.
+*.dll
+*.exe
+*.pdb
+*.ipk
+*.bik
+*.fx
+*.fxo
+*.dds
+*.ckd
+*.keys
+*.apk
