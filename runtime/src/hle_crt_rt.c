@@ -272,7 +272,7 @@ const HleImport hle_crt_table[] = {
     CRT_CDECL(ENTRY)
     {"msvcr90.dll", "_adjust_fdiv", 0, CONV_DATA, d_adjust_fdiv},
     {"msvcr90.dll", "_acmdln", 0, CONV_DATA, d_acmdln},
-    {"msvcr90.dll", "__sys_nerr", 0, CONV_DATA, d_sys_nerr},
+    {"msvcr90.dll", "__sys_nerr", 0, CONV_CDECL, d_sys_nerr},   /* a function returning int * */
     {"msvcr90.dll", "_CxxThrowException", 2, CONV_STDCALL, cxx_throw},
     {"msvcr90.dll", "__CxxLongjmpUnwind", 1, CONV_STDCALL, longjmp_unwind},
     {"msvcr90.dll", "?terminate@@YAXXZ", 0, CONV_CDECL, terminate_},

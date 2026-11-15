@@ -190,6 +190,17 @@ static HleFn vt_xbuf[5] = {xb_ok, xb_ok, xb_ok, xb_ptr, xb_size};
 static const uint8_t na_xbuf[5] = {3, 1, 1, 1, 1};
 static uint32_t vt_xbuf_guest;
 
+/* an ID3DXBuffer holding a copy of `size` bytes from host memory */
+uint32_t d3dx_buffer(const void *bytes, uint32_t size) {
+    if (!vt_xbuf_guest) vt_xbuf_guest = R32(obj_new_n("ID3DXBuffer", 5, vt_xbuf, na_xbuf, 16));
+    uint32_t data = gmalloc(size ? size : 4), b = gcalloc(16);
+    memcpy(HOST(data), bytes, size);
+    W32(b, vt_xbuf_guest);
+    W32(b + 8, data);
+    W32(b + 12, size);
+    return b;
+}
+
 /* (src, len, defines, include, flags, ppShader, ppErrors) */
 uint32_t x_D3DXAssembleShader(CPU *c, uint32_t a) {
     (void)c;

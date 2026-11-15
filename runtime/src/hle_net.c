@@ -4,6 +4,7 @@
  * What it does not do: networking of any kind (online play is out of scope for now).
  */
 #include <string.h>
+#include <time.h>
 
 #include "hle.h"
 
@@ -58,3 +59,24 @@ uint32_t x_SysAllocString(CPU *c, uint32_t a) {
     return p + 4;
 }
 uint32_t x_SysFreeString(CPU *c, uint32_t a) { (void)c; if (ARG(0)) gfree(ARG(0) - 4); return 0; }
+
+/* ---- added for Rayman Origins (Quazal online layer): events work, every socket call fails "network down" ---- */
+#define NETFAIL(name) uint32_t x_##name(CPU *c, uint32_t a) { (void)c; (void)a; wsa_error = WSAENETDOWN; return 0xFFFFFFFFu; }
+uint32_t x_WSACreateEvent(CPU *c, uint32_t a) { (void)c; (void)a; static uint32_t n; return 0x7E100000u + 4u * ++n; }
+uint32_t x_WSAResetEvent(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
+uint32_t x_WSACloseEvent(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
+uint32_t x_WSAWaitForMultipleEvents(CPU *c, uint32_t a) {        /* nothing ever arrives: wait the timeout out */
+    (void)c;
+    uint32_t ms = ARG(3);
+    if (ms && ms != 0xFFFFFFFFu) { struct timespec t = {ms / 1000, (long)(ms % 1000) * 1000000L}; nanosleep(&t, NULL); }
+    else if (ms == 0xFFFFFFFFu) { struct timespec t = {0, 100000000L}; nanosleep(&t, NULL); }
+    return 0x102u;                                                 /* WSA_WAIT_TIMEOUT */
+}
+uint32_t x_gethostname(CPU *c, uint32_t a) { (void)c; if (ARG(1) > 7) strcpy((char *)HOST(ARG(0)), "rayman"); return 0; }
+uint32_t x_getaddrinfo(CPU *c, uint32_t a) { (void)c; (void)a; return 11001u; }
+uint32_t x_freeaddrinfo(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
+uint32_t x___WSAFDIsSet(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
+uint32_t x_WSAGetOverlappedResult(CPU *c, uint32_t a) { (void)c; (void)a; wsa_error = WSAENETDOWN; return 0; }
+NETFAIL(WSAIoctl) NETFAIL(recvfrom) NETFAIL(WSARecvFrom) NETFAIL(WSASendTo) NETFAIL(WSASocketA) NETFAIL(getsockname)
+NETFAIL(closesocket) NETFAIL(select) NETFAIL(connect) NETFAIL(shutdown) NETFAIL(getpeername) NETFAIL(getsockopt)
+NETFAIL(bind) NETFAIL(listen) NETFAIL(send) NETFAIL(setsockopt) NETFAIL(accept)

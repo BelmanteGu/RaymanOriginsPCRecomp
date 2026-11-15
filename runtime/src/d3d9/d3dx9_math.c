@@ -9,6 +9,7 @@
  * What it does not do: the rest of D3DX.
  */
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "d3d9.h"
@@ -214,12 +215,45 @@ uint32_t x_D3DXCreateTexture(CPU *c, uint32_t a) {              /* (device, w, h
     return 0;
 }
 uint32_t x_D3DXFilterTexture(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
-uint32_t x_D3DXCompileShader(CPU *c, uint32_t a) {              /* (src, len, defines, include, function, profile, ...) */
+/* D3DXCompileShader: the game compiles the functions of its *_Register.fx sources at start-up. The archive carries
+ * the same functions precompiled (shaders/compiled/win32/<file>_vsh<N>.ckd / _psh<N>.ckd, numbered in the order the
+ * game compiles them; checked against each shader's constant table), so the bytecode is taken from there. */
+static const struct { const char *fn, *ckd; } precompiled[] = {
+    {"default_PCT_VS", "renderpct_vsh1"}, {"default_PC_VS", "renderpct_vsh2"}, {"default_PT_VS", "renderpct_vsh3"},
+    {"default_PCT_Patch_VS", "renderpct_vsh4"}, {"default_PNCT_VS", "renderpct_vsh5"}, {"frize_PNC3T_VS", "renderpct_vsh6"},
+    {"fluid_PCT_VS", "renderpct_vsh7"}, {"fluid2_PCT_VS", "renderpct_vsh8"}, {"trail_PCT_VS", "renderpct_vsh9"},
+    {"spline_PCT_VS", "renderpct_vsh10"}, {"default_PCT_BezierPatch_VS", "renderpct_vsh11"},
+    {"default_PTambiant_VS", "renderpct_vsh12"}, {"refraction_PCT_VS", "renderpct_vsh13"},
+    {"OVERLAY_PCBT_VS", "renderpct_vsh14"},
+    {"default_PCT_PS", "renderpct_psh1"}, {"default_PC_PS", "renderpct_psh2"}, {"default_PT_PS", "renderpct_psh3"},
+    {"fog_PCT_PS", "renderpct_psh4"}, {"fog_PC_PS", "renderpct_psh5"}, {"fog_PT_PS", "renderpct_psh6"},
+    {"overDraw_PS", "renderpct_psh7"}, {"refraction_PCT_PS", "renderpct_psh8"},
+    {"VS_Movie", "movie_vsh1"}, {"PS_MovieWIN32", "movie_psh1"},
+    {"VertScene", "font_vsh1"}, {"PixWithoutOutline", "font_psh1"}, {"PixWithOutline", "font_psh2"},
+    {"blur_VS", "afterfx_vsh1"}, {"PCT1_VS", "afterfx_vsh2"}, {"BigBlur_PS", "afterfx_psh1"}, {"AddMul_PS", "afterfx_psh2"},
+    {NULL, NULL},
+};
+uint8_t *ipk_read(const char *path, uint32_t *size);
+uint32_t d3dx_buffer(const void *bytes, uint32_t size);
+uint32_t x_D3DXCompileShader(CPU *c, uint32_t a) {              /* (src, len, defines, include, function, profile, flags, &shader, &errors, &ctab) */
     (void)c;
-    fprintf(stderr, "usf: D3DXCompileShader(%s, %s): HLSL compilation is not supported\n",
-            ARG(4) ? STR(ARG(4)) : "?", ARG(5) ? STR(ARG(5)) : "?");
-    if (ARG(7)) W32(ARG(7), 0);
+    const char *fn = ARG(4) ? STR(ARG(4)) : "";
     if (ARG(8)) W32(ARG(8), 0);
     if (ARG(9)) W32(ARG(9), 0);
+    for (int i = 0; precompiled[i].fn; i++) {
+        if (strcmp(precompiled[i].fn, fn)) continue;
+        char path[128];
+        uint32_t size = 0;
+        snprintf(path, sizeof path, "shaders/compiled/win32/%s.ckd", precompiled[i].ckd);
+        uint8_t *b = ipk_read(path, &size);
+        if (!b) break;
+        W32(ARG(7), d3dx_buffer(b, size));
+        free(b);
+        usf_log("D3DXCompileShader(%s, %s) -> %s (%u bytes)\n", fn, ARG(5) ? STR(ARG(5)) : "?", path, size);
+        return 0;
+    }
+    fprintf(stderr, "usf: D3DXCompileShader(%s, %s): no precompiled shader for this function\n", fn,
+            ARG(5) ? STR(ARG(5)) : "?");
+    if (ARG(7)) W32(ARG(7), 0);
     return 0x80004005u;
 }

@@ -29,6 +29,9 @@ typedef struct {
     int used, kind;                                  /* 0 source, 1 submix, 2 master */
     uint32_t guest, callback, flags;
     uint32_t ch, rate, bits, is_float, block;
+    uint32_t adpcm, spb;                             /* MS ADPCM (tag 2): samples per block */
+    uint32_t dec_data, dec_block;                    /* the block decoded in dec[] (guest data, index + 1) */
+    int16_t dec[8 * 2048];
     XBuf q[MAXQ];
     int qhead, qn, started_cur;
     double pos;                                      /* frame position inside the current buffer */
@@ -74,7 +77,44 @@ static void deliver(CPU *c) {
     }
 }
 
-static float sample(const Voice *v, const uint8_t *m, uint32_t frame, uint32_t ch) {
+/* MS ADPCM: one block decoded at a time (header per channel: predictor, delta, sample1, sample2; then 4-bit codes,
+ * high nibble first, channels interleaved) */
+static void adpcm_block(Voice *v, const uint8_t *b) {
+    static const int coef[7][2] = {{256, 0}, {512, -256}, {0, 0}, {192, 64}, {240, 0}, {460, -208}, {392, -232}};
+    static const int adapt[16] = {230, 230, 230, 230, 307, 409, 512, 614, 768, 614, 512, 409, 307, 230, 230, 230};
+    uint32_t nch = v->ch, spb = v->spb > 2048 ? 2048 : v->spb;
+    int c1[8], c2[8], delta[8], s1[8], s2[8];
+    for (uint32_t c = 0; c < nch; c++) {
+        int pi = b[c] < 7 ? b[c] : 0;
+        c1[c] = coef[pi][0]; c2[c] = coef[pi][1];
+        delta[c] = (int16_t)(b[nch + 2 * c] | b[nch + 2 * c + 1] << 8);
+        s1[c] = (int16_t)(b[3 * nch + 2 * c] | b[3 * nch + 2 * c + 1] << 8);
+        s2[c] = (int16_t)(b[5 * nch + 2 * c] | b[5 * nch + 2 * c + 1] << 8);
+        v->dec[c] = (int16_t)s2[c];
+        v->dec[nch + c] = (int16_t)s1[c];
+    }
+    const uint8_t *p = b + 7 * nch;
+    uint32_t n = 0, total = (spb - 2) * nch;
+    for (uint32_t k = 0; k < total; k++) {
+        int nib = (k & 1) ? (p[n++] & 15) : (p[n] >> 4), c = (int)(k % nch);
+        int sn = nib >= 8 ? nib - 16 : nib;
+        int pred = (s1[c] * c1[c] + s2[c] * c2[c]) / 256 + sn * delta[c];
+        if (pred > 32767) pred = 32767;
+        if (pred < -32768) pred = -32768;
+        s2[c] = s1[c]; s1[c] = pred;
+        delta[c] = adapt[nib] * delta[c] / 256;
+        if (delta[c] < 16) delta[c] = 16;
+        v->dec[(2 + k / nch) * nch + (uint32_t)c] = (int16_t)pred;
+    }
+}
+static uint32_t frames_of(const Voice *v, uint32_t bytes) { return v->adpcm ? bytes / v->block * v->spb : bytes / v->block; }
+
+static float sample(Voice *v, const uint8_t *m, uint32_t frame, uint32_t ch) {
+    if (v->adpcm) {
+        uint32_t blk = frame / v->spb, data = (uint32_t)(m - usf_mem);
+        if (v->dec_data != data || v->dec_block != blk + 1) { adpcm_block(v, m + (size_t)blk * v->block); v->dec_data = data; v->dec_block = blk + 1; }
+        return v->dec[(frame % v->spb) * v->ch + ch] / 32768.0f;
+    }
     const uint8_t *x = m + (size_t)frame * v->block + (size_t)ch * (v->bits / 8);
     if (v->is_float) { float f; memcpy(&f, x, 4); return f; }
     if (v->bits == 16) { int16_t s; memcpy(&s, x, 2); return s / 32768.0f; }
@@ -104,7 +144,7 @@ static void mix_voice(Voice *v, float *out, int frames) {
     for (int f = 0; f < frames && v->qn; f++) {
         XBuf *b = &v->q[v->qhead];
         if (!v->started_cur) { v->started_cur = 1; ev(v->callback, 3, b->ctx, 1); }        /* OnBufferStart */
-        uint32_t total = b->bytes / v->block;
+        uint32_t total = frames_of(v, b->bytes);
         uint32_t begin = b->play_begin, end = b->play_len ? b->play_begin + b->play_len : total;
         if (end > total) end = total;
         uint32_t lend = b->loop_len ? b->loop_begin + b->loop_len : end;
@@ -244,7 +284,9 @@ static void read_format(Voice *v, uint32_t fmt) {
     uint16_t tag = R16(fmt);
     v->ch = R16(fmt + 2); v->rate = R32(fmt + 4); v->block = R16(fmt + 12); v->bits = R16(fmt + 14);
     v->is_float = tag == 3 || (tag == 0xFFFE && R16(fmt + 16) >= 22 && R32(fmt + 24) == 3);
-    if (tag != 1 && tag != 3 && tag != 0xFFFE) fprintf(stderr, "usf: XAudio2: format tag %u not mixed\n", tag);
+    v->adpcm = tag == 2;
+    if (v->adpcm) { v->spb = R16(fmt + 18); v->dec_block = 0; if (!v->spb || v->spb > 2048) v->spb = 2048; }
+    if (tag != 1 && tag != 2 && tag != 3 && tag != 0xFFFE) fprintf(stderr, "usf: XAudio2: format tag %u not mixed\n", tag);
     if (!v->block) v->block = v->ch * v->bits / 8;
     if (v->ch > 8) v->ch = 8;
 }
@@ -398,7 +440,7 @@ static const uint8_t n_v[29] = {2, 2, 2, 3, 3, 3, 5, 4, 3, 2, 4, 3, 3, 2, 4, 3, 
 uint32_t xaudio2_create(uint32_t clsid, uint32_t out);
 uint32_t xaudio2_create(uint32_t clsid, uint32_t out) {
     if (R32(clsid) != 0x5a508685u && R32(clsid) != 0xdb05ea35u) return 0x80040154u;   /* XAudio2 2.7 (and debug) */
-    if (!getenv("USF_XAUDIO2")) return 0x80040154u;      /* off by default until the exit during the opening is found */
+    if (getenv("USF_NO_XAUDIO2")) return 0x80040154u;   /* for tests: no sound device */
     if (!engine_obj) {
         engine_obj = obj_new_n("IXAudio2", 16, t_x2, n_x2, 16);
         vt_source = R32(obj_new_n("IXAudio2SourceVoice", 29, t_v, n_v, 16));

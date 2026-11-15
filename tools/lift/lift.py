@@ -203,7 +203,8 @@ def main():
     ap.add_argument("--analysis", default="private/analysis")
     ap.add_argument("--out", default="private/lifted")
     ap.add_argument("--only", help="comma-separated function addresses")
-    ap.add_argument("--per-file", type=int, default=400)
+    ap.add_argument("--bucket", type=lambda x: int(x, 0), default=0x10000,
+                    help="bytes of .text per output file: a file's functions only change when its range does")
     ap.add_argument("--exe", default=DEFAULT_EXE)
     ap.add_argument("--table", default="usf_table", help="symbol of the address table (one per module)")
     a = ap.parse_args()
@@ -222,12 +223,10 @@ def main():
     nexts = sorted(starts)
     import bisect
     os.makedirs(a.out, exist_ok=True)
-    for old in os.listdir(a.out):                  # files of a previous lift with more chunks would define twice
-        if old.startswith("lifted_") and old.endswith(".c"):
-            os.remove(os.path.join(a.out, old))
-    reasons, lifted, failed, chunks = collections.Counter(), 0, [], []
-    cur = []
+    reasons, lifted, failed = collections.Counter(), 0, []
+    buckets = collections.defaultdict(list)
     for s in todo:
+        cur = buckets[(s - img.text_start) // a.bucket]
         i = bisect.bisect_right(nexts, s)
         f = d.run(s, starts.__contains__, img.text_end)   # stop only AT other starts: a jump over a false start stays inside
         try:
@@ -242,16 +241,23 @@ def main():
             failed.append((s, why))
             cur.append("void %s(CPU *c) { usf_unknown(c, %s, \"not lifted: %s\"); }\n" % (
                 fname(s), hexu(s), why.replace('"', "'")))
-        if len(cur) >= a.per_file:
-            chunks.append(cur)
-            cur = []
-    if cur:
-        chunks.append(cur)
-    for n, ch in enumerate(chunks):
-        with open(os.path.join(a.out, "lifted_%03d.c" % n), "w") as fh:
-            fh.write(HEADER + "\n".join(ch))
-    with open(os.path.join(a.out, "lifted.h"), "w") as fh:
-        fh.write("#pragma once\n#include \"usf/cpu.h\"\n" + "".join("void %s(CPU *c);\n" % fname(s) for s in sorted(starts)))
+    chunks = buckets
+    names = set()
+    for n, ch in sorted(buckets.items()):          # written only when changed: the build recompiles only those
+        path = os.path.join(a.out, "lifted_%03d.c" % n)
+        names.add(os.path.basename(path))
+        text = HEADER + "\n".join(ch)
+        if not os.path.exists(path) or open(path).read() != text:
+            with open(path, "w") as fh:
+                fh.write(text)
+    for old in os.listdir(a.out):                  # files of an earlier layout would define functions twice
+        if old.startswith("lifted_") and old[7:10].isdigit() and old.endswith(".c") and old not in names:
+            os.remove(os.path.join(a.out, old))
+    header = "#pragma once\n#include \"usf/cpu.h\"\n" + "".join("void %s(CPU *c);\n" % fname(s) for s in sorted(starts))
+    hp = os.path.join(a.out, "lifted.h")
+    if not os.path.exists(hp) or open(hp).read() != header:
+        with open(hp, "w") as fh:
+            fh.write(header)
     with open(os.path.join(a.out, "lifted_table.c"), "w") as fh:
         fh.write('#include "lifted.h"\n#include "usf/table.h"\nconst USFEntry %s[] = {\n' % a.table)
         fh.write("".join("    {%s, %s},\n" % (hexu(s), fname(s)) for s in sorted(starts)))

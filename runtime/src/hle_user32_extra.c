@@ -55,7 +55,20 @@ uint32_t u32_GetUserObjectInformationW(CPU *c, uint32_t a) {    /* (h, index, in
     if (ARG(4)) W32(ARG(4), 12);
     return 1;
 }
-uint32_t u32_GetKeyState(CPU *c, uint32_t a) { return u32_GetAsyncKeyState(c, a); }
+/* GetKeyState: the game polls all 256 virtual keys every frame. A pressed key reads as a negative SHORT. USF_INPUT
+ * (unattended tests, letters as in hle_xinput.c) also presses keys: A / S = Enter and Space, B = Escape,
+ * K = Backspace, X = 'X', Y = 'Y', d-pad = arrow keys. */
+uint16_t usf_scripted_buttons(void);
+uint32_t u32_GetKeyState(CPU *c, uint32_t a) {
+    uint32_t vk = ARG(0) & 0xFF;
+    uint16_t b = usf_scripted_buttons();
+    static const struct { uint16_t bit; uint8_t vk; } map[] = {
+        {0x1000, 0x0D}, {0x1000, 0x20}, {0x0010, 0x0D}, {0x2000, 0x1B}, {0x0020, 0x08}, {0x4000, 'X'}, {0x8000, 'Y'},
+        {0x0001, 0x26}, {0x0002, 0x28}, {0x0004, 0x25}, {0x0008, 0x27}};
+    for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
+        if ((b & map[i].bit) && map[i].vk == vk) return 0xFFFFFF80u;
+    return u32_GetAsyncKeyState(c, a) ? 0xFFFFFF80u : 0u;   /* -128, as Windows returns it */
+}
 
 /* EnumDisplaySettingsW(device, mode, DEVMODEW*): mode 0 and ENUM_CURRENT_SETTINGS are the desktop; no others */
 uint32_t u32_EnumDisplaySettingsW(CPU *c, uint32_t a) {
