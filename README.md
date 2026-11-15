@@ -25,27 +25,46 @@ This one starts from the **PC build** because that is the copy people can still 
 
 ## Status
 
-| Phase | Goal | Status |
-|---|---|---|
-| 0 | Read the executable and the data: imports, protection, engine, shaders | ✅ [study](docs/studies/pe-analysis-1511.md) |
-| 1 | Function discovery + lifter (from USFIV-PC) produce C that compiles | ⏳ |
-| 2 | Runtime boots the game to its main loop (window, D3D9 device) | — |
-| 3 | HLSL `.fx` → SM2/SM3 bytecode (D3DX effects) → SPIR-V; first frames | — |
-| 4 | Audio (XAudio2), input, Bink movies (FFmpeg), a full level | — |
-| 5 | Widescreen / ultrawide, then Android (arm64, touch) | — |
+![21:9 in a window](docs/media/m4-ultrawide-219.jpg)
 
-Plan: [docs/PLAN.md](docs/PLAN.md) · log: [docs/PROGRESS.md](docs/PROGRESS.md) · rules: [docs/RULES.md](docs/RULES.md)
+| | |
+|---|---|
+| ✅ **Recompiled** | 45,190 functions of `Rayman Origins.exe`, all lifted to C; x86-64 and arm64 |
+| ✅ **Runs on Linux** | title, menus, world map, levels; unattended 30,000-frame run with no stop |
+| ✅ **Ultrawide** | Hor+ through UbiArt's own 16/9 pair: 21:9 in a window by default (1920x822) |
+| ✅ **60 / 120 fps** | paced Present; 120 = the engine's own logic rate at 120 (real steps, not interpolation) |
+| ✅ **Sound and movies** | XAudio2 (PCM, MS ADPCM); Bink movies through FFmpeg, with their soundtrack |
+| ✅ **Touch** | on-screen controls and the port's settings drawn in the game (under the game's pause menu) |
+| 🟡 **Android** | APK builds (arm64, Vulkan 1.1); not run on a phone yet |
 
-## How it will work
+Log: [docs/PROGRESS.md](docs/PROGRESS.md) · Android: [docs/ANDROID.md](docs/ANDROID.md) · plan:
+[docs/PLAN.md](docs/PLAN.md) · rules: [docs/RULES.md](docs/RULES.md)
+
+## Playing on the PC (Linux)
+
+```sh
+sh tools/full_pipeline.sh        # discovery, lift, compile (x86-64 + arm64), runtime: ~10 min the first time
+private/build/rayman             # finds the Steam install by itself (or: private/build/rayman <game folder>)
+```
+
+| Variable | |
+|---|---|
+| `RAYMAN_RES=2560x1080` | window size (and so the aspect); otherwise the size chosen in the game's Options, or 1920x822 |
+| `RAYMAN_FULLSCREEN=1` | full screen |
+| `RAYMAN_FPS=120` | 120 fps (also in the touch settings); `0` = unpaced |
+| `RAYMAN_TOUCH=1` | the on-screen controls on the PC (the mouse is a finger) |
+
+## How it works
 
 ```
 Rayman Origins.exe (x86-32) ──► function discovery ──► lifter ──► C ──► clang ──► x86-64 / ARM64
 
 runtime (C)
  ├─ kernel32, user32, MSVCR90/MSVCP90 (host libc), DirectInput, XInput, XAudio2, WinSock/Quazal (offline) …
- ├─ D3DX9: math, ID3DXEffect, HLSL compile (vkd3d-shader) ──► SM2/SM3 bytecode
+ ├─ D3DX9: math, ID3DXEffect; HLSL compiles answered with the game's own precompiled shaders
  ├─ Direct3D 9 ──► Vulkan 1.1   (D3D bytecode ──► SPIR-V)
- └─ binkw32 ──► FFmpeg (Bink video/audio)
+ ├─ binkw32 ──► FFmpeg (Bink video/audio)
+ └─ touch layer (controls, port settings) drawn over the frame
 ```
 
 The pipeline and most of the runtime come from

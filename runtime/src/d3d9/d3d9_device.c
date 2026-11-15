@@ -317,13 +317,15 @@ static uint32_t Reset(CPU *c, uint32_t a) {                     /* a new size (t
  * that comes late resets the schedule instead of being caught up. */
 static void pace(void) {
     static double next;
-    static int fps = -1;
-    if (fps < 0) { const char *e = getenv("RAYMAN_FPS"); fps = e ? atoi(e) : 60; }
+    const char *e = getenv("RAYMAN_FPS");                        /* read every frame: the touch settings change it */
+    int fps = e ? atoi(e) : 60;
+    static int last = 60;
     if (fps <= 0) return;
-    if (fps != 60) {                                           /* the engine's own rates follow (game.h) */
+    if (fps != 60 || last != 60) {                             /* the engine's own rates follow (game.h) */
         float f = (float)fps, dt = 1.0f / f;
         uint32_t v = GAME_RATE_VARS;
         if (RF32(v) != f || RF32(v + 4) != f) { WF32(v, f); WF32(v + 4, f); WF32(v + 8, dt); WF32(v + 12, dt); }
+        last = fps;
     }
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);

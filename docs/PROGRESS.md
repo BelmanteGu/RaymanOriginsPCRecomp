@@ -125,3 +125,14 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   (W/A/S/D, J/K/U/I), so a key could count twice; the pad is now the physical gamepad only.
 
 ![Taps on the settings: controls off, then 120 fps](media/m6-touch-settings.jpg)
+
+## 2026-11-15 — Android build; settings change live; a note on measurements
+
+- Android: `tools/android/build_ffmpeg.sh` (Bink only), `build_native.sh`, `build_apk.sh` produce
+  `rayman-origins-pc.apk` (arm64, signed, verified; no unresolved strong symbols). Not run on a phone: none was
+  connected. See [ANDROID.md](ANDROID.md).
+- The fps setting is read every frame, so 60 / 120 from the touch settings applies at once (it was read only at
+  start-up).
+- A 50,000-frame soak ran at ~16 fps and a later check at ~37 fps: three USFIV-PC test runs of another session were
+  using the CPU and the shared GPU at the same time. With the machine free the same runs hold 60 fps (earlier
+  entries). Measurements are only meaningful on an idle machine.
