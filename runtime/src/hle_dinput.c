@@ -117,20 +117,12 @@ static uint32_t pad_state(CPU *c, uint32_t a) {
         up = SDL_GetGamepadButton(sdlpad, SDL_GAMEPAD_BUTTON_DPAD_UP); down = SDL_GetGamepadButton(sdlpad, SDL_GAMEPAD_BUTTON_DPAD_DOWN);
         left = SDL_GetGamepadButton(sdlpad, SDL_GAMEPAD_BUTTON_DPAD_LEFT); right = SDL_GetGamepadButton(sdlpad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
     }
-    const bool *k = SDL_GetKeyboardState(NULL);
+    /* Rayman reads the keyboard itself (GetKeyState): the pad is the physical gamepad only, plus USF_INPUT for tests */
     uint16_t sb = usf_scripted_buttons();
-    up |= k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W] || (sb & 1); down |= k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S] || (sb & 2);
-    left |= k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A] || (sb & 4); right |= k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D] || (sb & 8);
-    btn[0] |= k[SDL_SCANCODE_J] || (sb & 0x1000) != 0;     /* A: LK */
-    btn[1] |= k[SDL_SCANCODE_K] || (sb & 0x2000) != 0;     /* B: MK */
-    btn[2] |= k[SDL_SCANCODE_U] || (sb & 0x4000) != 0;     /* X: LP */
-    btn[3] |= k[SDL_SCANCODE_I] || (sb & 0x8000) != 0;     /* Y: MP */
-    btn[4] |= k[SDL_SCANCODE_Q];                            /* LB */
-    btn[5] |= k[SDL_SCANCODE_O];                            /* RB: HP */
-    btn[6] |= k[SDL_SCANCODE_BACKSPACE] || k[SDL_SCANCODE_ESCAPE] || (sb & 0x20) != 0;
-    btn[7] |= k[SDL_SCANCODE_RETURN] || (sb & 0x10) != 0; /* Start */
-    if (k[SDL_SCANCODE_L]) z = -32768;                     /* RT: HK */
-    if (k[SDL_SCANCODE_E]) z = 32767;                      /* LT */
+    up |= (sb & 1) != 0; down |= (sb & 2) != 0; left |= (sb & 4) != 0; right |= (sb & 8) != 0;
+    btn[0] |= (sb & 0x1000) != 0; btn[1] |= (sb & 0x2000) != 0; btn[2] |= (sb & 0x4000) != 0; btn[3] |= (sb & 0x8000) != 0;
+    btn[4] |= (sb & 0x0100) != 0; btn[5] |= (sb & 0x0200) != 0;   /* LB, RB: run */
+    btn[6] |= (sb & 0x20) != 0; btn[7] |= (sb & 0x0410) != 0;
     int32_t v[6] = {scale(lx), scale(ly), scale(z), scale(rx), scale(ry), scale(0)};
     for (int i = 0; i < 6 && 4u * (uint32_t)i + 4 <= n; i++) W32(p + 4u * (uint32_t)i, (uint32_t)v[i]);
     int pov = -1;                                          /* hundredths of a degree, clockwise from up */

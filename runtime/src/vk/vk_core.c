@@ -468,9 +468,11 @@ static void present_headless(void) {
     if (shot_pending) shot_write(g_dev.frames);
 }
 
+void vk_overlay_draw(void);
 void r_present(void) {
     if (!ready) return;
     vk_end_pass();
+    vk_overlay_draw();                                         /* the touch layer over the frame (vk_overlay.c) */
     if (g_headless) {
         present_headless();
         fps_log();

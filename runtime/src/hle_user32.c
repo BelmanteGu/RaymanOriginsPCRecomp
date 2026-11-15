@@ -11,7 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "d3d9/d3d9.h"
 #include "hle.h"
+
+void touch_script(uint32_t frame);
+
+int touch_active(void);
+void touch_event(int type, long id, float x, float y, float screen_aspect);
 
 uint32_t guest_call(CPU *c, uint32_t addr, int conv, int n, ...);
 
@@ -190,6 +196,18 @@ static void pump(void) {
     if (!sdl_ready) return;
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
+        if (touch_active()) {                                   /* the on-screen controls (touch.c) */
+            int ww = 1, wh = 1;
+            if (g_window) SDL_GetWindowSize(g_window, &ww, &wh);
+            float asp = wh ? (float)ww / (float)wh : 1.78f;
+            if (e.type == SDL_EVENT_FINGER_DOWN || e.type == SDL_EVENT_FINGER_MOTION || e.type == SDL_EVENT_FINGER_UP)
+                touch_event(e.type == SDL_EVENT_FINGER_DOWN ? 0 : e.type == SDL_EVENT_FINGER_UP ? 2 : 1,
+                            (long)e.tfinger.fingerID, e.tfinger.x, e.tfinger.y, asp);
+            else if ((e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP) && e.button.which != SDL_TOUCH_MOUSEID)
+                touch_event(e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? 0 : 2, 0x7FFF, e.button.x / ww, e.button.y / wh, asp);
+            else if (e.type == SDL_EVENT_MOUSE_MOTION && e.motion.which != SDL_TOUCH_MOUSEID && (e.motion.state & SDL_BUTTON_LMASK))
+                touch_event(1, 0x7FFF, e.motion.x / ww, e.motion.y / wh, asp);
+        }
         switch (e.type) {
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED: g_quitting = 1; post(HWND_MAIN, 0x0010u, 0, 0); break;   /* WM_CLOSE */
@@ -217,6 +235,7 @@ static void pump(void) {
         }
     }
     scripted_keys();
+    touch_script(g_dev.frames);                                /* USF_TOUCH (tests) */
 }
 
 static int take(uint32_t msgp, uint32_t remove) {

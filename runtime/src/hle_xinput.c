@@ -37,7 +37,8 @@ static int16_t axis(SDL_Gamepad *g, SDL_GamepadAxis a, int invert) {
  * Letters: U D L R (d-pad), S start, K back, A B X Y, 1 = LB, 2 = RB, 3 = LT, 4 = RT. */
 #include "d3d9/d3d9.h"
 static uint16_t scripted(uint8_t *lt, uint8_t *rt);
-uint16_t usf_scripted_buttons(void) { uint8_t l = 0, r = 0; return scripted(&l, &r); }
+uint16_t touch_buttons(void);                                  /* the on-screen controls (touch.c) */
+uint16_t usf_scripted_buttons(void) { uint8_t l = 0, r = 0; return scripted(&l, &r) | touch_buttons(); }
 static uint16_t scripted(uint8_t *lt, uint8_t *rt) {
     const char *sc = getenv("USF_INPUT");
     if (!sc) return 0;

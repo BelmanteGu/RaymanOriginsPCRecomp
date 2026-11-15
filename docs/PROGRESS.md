@@ -104,3 +104,24 @@ second, not interpolated frames. Checked: the same script at 60 and at 120 fps (
 Rayman in the same place at the same real time (top 60, bottom 120):
 
 ![60 vs 120 fps at the same moments](media/m5-60-vs-120.jpg)
+
+## 2026-11-15 — On-screen controls and the port's settings, in the game, by touch
+
+![Controls in play; pause: the game's own pause menu with the port's settings under it](media/m6-touch-pause.jpg)
+
+Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted fingers (`USF_TOUCH`), 2026-11-15:
+
+- **In play only the controls show**: a floating stick where the left thumb lands, A (jump), X (attack), B, a RUN
+  toggle and a pause button. Fingers become the same pad bits the game already reads (its keyboard through
+  `GetKeyState` and its DirectInput pad). Drawn by the runtime: `touch.c` paints an RGBA picture (shapes and a
+  built-in 5x7 font), `vk/vk_overlay.c` blends it over the back buffer (one full-screen triangle, premultiplied
+  alpha), only re-uploaded when it changes.
+- **Pause** sends Esc + Start: the game opens its own pause menu, and the port's settings appear under it, also by
+  touch: on-screen controls on/off, size S/M/L, opacity 25/50/75 %, 60 / 120 fps. Kept in `port_settings.txt`
+  in the data folder. With the controls off, only the pause button stays (it is the way back to the settings).
+- **Resolution** stays where the game has it: the PC build's own Options have a resolution selector, filled from
+  `IDirect3D9::EnumAdapterModes`, which the runtime answers.
+- Found on the way: the keyboard was also mirrored into the DirectInput pad with USFIV's fighting layout
+  (W/A/S/D, J/K/U/I), so a key could count twice; the pad is now the physical gamepad only.
+
+![Taps on the settings: controls off, then 120 fps](media/m6-touch-settings.jpg)

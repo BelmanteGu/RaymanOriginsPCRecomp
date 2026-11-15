@@ -64,7 +64,7 @@ uint32_t u32_GetKeyState(CPU *c, uint32_t a) {
     uint16_t b = usf_scripted_buttons();
     static const struct { uint16_t bit; uint8_t vk; } map[] = {
         {0x1000, 0x0D}, {0x1000, 0x20}, {0x0010, 0x0D}, {0x2000, 0x1B}, {0x0020, 0x08}, {0x4000, 'X'}, {0x8000, 'Y'},
-        {0x0001, 0x26}, {0x0002, 0x28}, {0x0004, 0x25}, {0x0008, 0x27}};
+        {0x0001, 0x26}, {0x0002, 0x28}, {0x0004, 0x25}, {0x0008, 0x27}, {0x0400, 0x1B}};   /* 0x0400: pause (touch) */
     for (unsigned i = 0; i < sizeof map / sizeof map[0]; i++)
         if ((b & map[i].bit) && map[i].vk == vk) return 0xFFFFFF80u;
     return u32_GetAsyncKeyState(c, a) ? 0xFFFFFF80u : 0u;   /* -128, as Windows returns it */

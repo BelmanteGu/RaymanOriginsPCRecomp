@@ -406,6 +406,7 @@ int main(int argc, char **argv) {
     if (!g_game_dir[0])
         snprintf(g_game_dir, sizeof g_game_dir, "%s" GAME_DEFAULT_DIR, getenv("HOME"));
     usf_log_on = getenv("USF_LOG") != NULL;
+    { void touch_init(void); touch_init(); }   /* the on-screen controls and the port settings (touch.c) */
     usf_mem = mmap(NULL, 1ull << 32, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (usf_mem == MAP_FAILED) { perror("usf: reserve 4 GiB"); return 1; }
     mprotect(usf_mem, 0x10000, PROT_NONE);  /* null pointer accesses fault */
