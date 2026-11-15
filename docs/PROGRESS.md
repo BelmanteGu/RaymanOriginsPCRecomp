@@ -39,3 +39,17 @@ layer at 60 fps, ~132 draws per frame.
 ![The runtime's frame counter](media/m2-60fps-log.jpg)
 
 Not done yet: Bink movies (skipped), MS ADPCM sounds (added, not checked by ear), gameplay past the title.
+
+## 2026-11-15 — M3 (first part): gameplay, natively, at 60 fps
+
+![First level, native](media/m3-gameplay-native.jpg)
+
+Verified on Linux x86-64, 2026-11-15, unattended (`USF_INPUT` presses Enter / Space every 2 s): past the title, the
+save notice and the intro, into the first level, with Rayman jumping, rain, light shafts and the HUD drawn right, at
+60 fps (~72 draws per frame). The one stop on the way was a second entry point inside an already known function
+(`0x90AB20`, reached through a function pointer); the runtime wrote it to `extra_starts.txt` and the pipeline,
+now incremental (output files grouped by `.text` range, rebuilt only when they change), took 6.5 minutes.
+
+![The run, frame 900 to 5900](media/m3-sequence.jpg)
+
+Next: Bink movies through FFmpeg (the intro is skipped now), checking the sound by ear, a whole level with a pad.
