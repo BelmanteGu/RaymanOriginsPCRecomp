@@ -7,10 +7,13 @@
  * presents to the renderer. Method indices follow the Windows interfaces; every method pops what its call site pushed.
  * What it does not do: fixed-function lighting/transforms (recorded, not drawn), patches, software vertex processing.
  */
+#include <errno.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 
 #include "d3d9.h"
+#include "../game.h"
 
 DevState g_dev;
 uint32_t g_device_guest, g_d3d9_guest;
@@ -107,11 +110,10 @@ static uint32_t make_backbuffer(uint32_t pp) {
     return w | h << 16;
 }
 
-/* Ultrawide (Hor+), as in the Xbox 360 port (docs/studies/ultrawide-1511.md): the game's "screen aspect" 16/9
- * (.rdata 0x967220: the viewport code's value, the cameras' default) and the 16/9 in the fight cameras' FOV formula
- * fov = 2 atan(tan(h) * (16/9) / aspect) (.rdata 0x954A34) both become the wide aspect A in guest memory: the vertical
- * field of view stays what it is at 16:9 and the view gets wider. USF_ASPECT: auto (the back buffer's shape when wider
- * than 16:9; the default), 16:9 (the game as it was), 21:9, 32:9, or a number. Nothing in the game's files changes. */
+/* Ultrawide (Hor+): UbiArt fits its cameras and screen rectangles to the 16/9, 9/16 pair at GAME_ASPECT_PAIR (game.h);
+ * both become A and 1/A in guest memory, so the view gets wider and the 2D keeps its proportions (the engine places
+ * it). USF_ASPECT: auto (the back buffer's shape when wider than 16:9; the default), 16:9 (the game as it was), 21:9,
+ * 32:9, or a number. Nothing in the game's files changes. */
 float g_aspect = 16.0f / 9.0f;
 static void apply_aspect(uint32_t w, uint32_t h) {
     const char *e = getenv("USF_ASPECT");
@@ -123,8 +125,11 @@ static void apply_aspect(uint32_t w, uint32_t h) {
     if (a < 16.0f / 9.0f + 0.002f) return;                      /* 16:9 or narrower: the game as it was */
     if (a > 32.0f / 9.0f) a = 32.0f / 9.0f;
     g_aspect = a;
-    if (R32(0x967220) == 0x3FE38E39u) memcpy(HOST(0x967220), &a, 4);
-    if (R32(0x954A34) == 0x3FE38E39u) memcpy(HOST(0x954A34), &a, 4);
+    float inv = 1.0f / a;
+    if (R32(GAME_ASPECT_PAIR) == 0x3FE38E39u && R32(GAME_ASPECT_PAIR + 4) == 0x3F100000u) {
+        memcpy(HOST(GAME_ASPECT_PAIR), &a, 4);
+        memcpy(HOST(GAME_ASPECT_PAIR + 4), &inv, 4);
+    } else fprintf(stderr, "usf: ultrawide: the 16/9 pair is not where expected; left as it is\n");
     fprintf(stderr, "usf: ultrawide: aspect %.4f (Hor+)\n", a);
 }
 
@@ -279,7 +284,26 @@ static uint32_t GetCreationParameters(CPU *c, uint32_t a) { (void)c; W32(ARG(1),
 static uint32_t GetSwapChain(CPU *c, uint32_t a) { (void)c; if (!g_swapchain) g_swapchain = d3d_new(OBJ_SWAPCHAIN, NULL); W32(ARG(2), g_swapchain); return 0; }
 static uint32_t GetNumberOfSwapChains(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
 static uint32_t Reset(CPU *c, uint32_t a) { (void)c; make_backbuffer(ARG(1)); r_init(g_dev.bb_w, g_dev.bb_h); return 0; }
-static uint32_t Present(CPU *c, uint32_t a) { (void)c; (void)a; r_present(); g_dev.frames++; return 0; }
+/* The game advances one step per presented frame, so frames are paced: 60 per second (RAYMAN_FPS to change, 0 = no
+ * limit), whatever the display's refresh (a 144 Hz screen would otherwise run the game 2.4 times too fast). A frame
+ * that comes late resets the schedule instead of being caught up. */
+static void pace(void) {
+    static double next;
+    static int fps = -1;
+    if (fps < 0) { const char *e = getenv("RAYMAN_FPS"); fps = e ? atoi(e) : 60; }
+    if (fps <= 0) return;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double now = (double)ts.tv_sec + ts.tv_nsec / 1e9, period = 1.0 / fps;
+    if (next == 0.0 || now > next + period) next = now;           /* first frame, or late: start again from now */
+    else if (now < next) {
+        double d = next - now;
+        struct timespec sl = {(time_t)d, (long)((d - (double)(time_t)d) * 1e9)};
+        while (nanosleep(&sl, &sl) && errno == EINTR) {}
+    }
+    next += period;
+}
+static uint32_t Present(CPU *c, uint32_t a) { (void)c; (void)a; r_present(); pace(); g_dev.frames++; return 0; }
 static uint32_t GetBackBuffer(CPU *c, uint32_t a) { (void)c; W32(ARG(4), g_dev.backbuffer); return 0; }
 static uint32_t GetRasterStatus(CPU *c, uint32_t a) { (void)c; memset(HOST(ARG(2)), 0, 8); return 0; }
 static uint32_t SetRenderTarget(CPU *c, uint32_t a) { (void)c; if (ARG(1) < 4) g_dev.rt[ARG(1)] = ARG(2); return 0; }

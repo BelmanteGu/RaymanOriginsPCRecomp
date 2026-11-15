@@ -53,3 +53,24 @@ now incremental (output files grouped by `.text` range, rebuilt only when they c
 ![The run, frame 900 to 5900](media/m3-sequence.jpg)
 
 Next: Bink movies through FFmpeg (the intro is skipped now), checking the sound by ear, a whole level with a pad.
+
+## 2026-11-15 — Ultrawide in a window, 60 fps paced, sound
+
+![21:9 in a window, wider view](media/m4-ultrawide-219.jpg)
+
+Verified on Linux x86-64 (1920x1080 144 Hz laptop), 2026-11-15:
+
+- **Ultrawide (Hor+).** UbiArt fits its cameras and screen rectangles to a 16/9, 9/16 pair of floats in `.rdata`
+  (`0xA2C1B4`; the Xbox 360 port changes the same pair). At start-up both become A and 1/A, A = the back buffer's
+  shape: the view gets wider and the engine places its own HUD (the lums and gems counters at the right edge
+  above). The USFIV-PC 2D narrowing and its SSFIV addresses are off.
+- **Window.** The game reads `ScreenWidth`, `ScreenHeight` (strings) and `FullScreen` (dword) from its registry key;
+  the runtime answers them: 1920x822 (21:9 on a 1920-wide desktop) windowed, `RAYMAN_RES=WxH`,
+  `RAYMAN_FULLSCREEN=1`.
+- **60 fps on any display.** The game advances one step per presented frame (the 360 port found the same), so
+  Present is paced at 60 per second (`RAYMAN_FPS`); a late frame restarts the schedule rather than catching up.
+  Without it this 144 Hz screen would run the game 2.4 times too fast.
+- **Sound.** XAudio2 with MS ADPCM decoding. 60 s of the mix dumped (`USF_AUDIO_DUMP`): peaks 0.3–0.5, no NaN,
+  1,000–6,000 zero crossings per second (music and effects, not noise). Not yet checked by ear.
+- **Exit.** The game's shutdown crashes in the destructor of an online-layer object (`0x8F8660`); after the player
+  closes the window a fault ends the process normally (saves are made at checkpoints). The cause is still open.

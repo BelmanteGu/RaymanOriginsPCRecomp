@@ -358,7 +358,25 @@ static void android_log(void) {
 }
 #endif
 
+/* Closing the game: Rayman Origins saves at its checkpoints, so nothing is lost at exit, but its shutdown crashes in
+ * the destructor of an online-layer (Quazal) object (0x8F8660, a std::map walked after it was freed). Until that is
+ * understood, a fault after the player closed the window ends the process normally, with a note. Before that, a
+ * fault is reported as the crash it is. */
+#include <signal.h>
+extern volatile int g_quitting;
+static void on_fault(int sig) {
+    if (g_quitting) {
+        static const char m[] = "usf: fault during the game's shutdown (known, see process.c): exiting normally\n";
+        if (write(2, m, sizeof m - 1) < 0) {}
+        _exit(0);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 int main(int argc, char **argv) {
+    signal(SIGSEGV, on_fault);
+    signal(SIGBUS, on_fault);
 #ifdef __ANDROID__
     android_log();
 #endif

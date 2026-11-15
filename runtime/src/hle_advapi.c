@@ -97,8 +97,34 @@ uint32_t x_RegCreateKeyExW(CPU *c, uint32_t a) {                 /* (root, subke
     return 0;
 }
 uint32_t x_RegCloseKey(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
+/* The video settings are the runtime's, not the registry's: the window size (RAYMAN_RES=WxH, or 21:9 that fits the
+ * desktop) and windowed mode (RAYMAN_FULLSCREEN=1 for full screen). Returns 1 if `name` was one of them. */
+static int video_setting(uint32_t wname, uint32_t type_out, uint32_t data, uint32_t size_io) {
+    char vn[64];
+    w2utf8(wname, vn, sizeof vn);
+    int w = GAME_DEFAULT_W, h = GAME_DEFAULT_H;
+    const char *r = getenv("RAYMAN_RES");
+    if (r) sscanf(r, "%dx%d", &w, &h);
+    char text[16];
+    if (!strcasecmp(vn, "ScreenWidth") || !strcasecmp(vn, "ScreenHeight")) {
+        snprintf(text, sizeof text, "%d", !strcasecmp(vn, "ScreenWidth") ? w : h);
+        uint32_t need = 2u * ((uint32_t)strlen(text) + 1);
+        if (type_out) W32(type_out, 1);                            /* REG_SZ */
+        if (data && size_io && R32(size_io) >= need) utf8_to_w(text, data, need / 2);
+        if (size_io) W32(size_io, need);
+        return 1;
+    }
+    if (!strcasecmp(vn, "FullScreen")) {
+        if (type_out) W32(type_out, 4);                            /* REG_DWORD */
+        if (data) W32(data, getenv("RAYMAN_FULLSCREEN") ? 1u : 0u);
+        if (size_io) W32(size_io, 4);
+        return 1;
+    }
+    return 0;
+}
 uint32_t x_RegQueryValueExW(CPU *c, uint32_t a) {                /* (key, name, 0, &type, data, &size) */
     (void)c;
+    if (ARG(1) && video_setting(ARG(1), ARG(3), ARG(4), ARG(5))) return 0;
     pthread_mutex_lock(&reg_lock);
     RegVal *v = find_val(ARG(0), ARG(1), 0);
     uint32_t r = 2;                                                /* ERROR_FILE_NOT_FOUND */

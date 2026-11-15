@@ -27,6 +27,7 @@ typedef struct { uint32_t hwnd, msg, wp, lp; } Msg;
 static Msg queue[256];
 static int qhead, qtail;
 static int quit_posted;
+volatile int g_quitting;                                       /* the player closed the window (process.c) */
 static uint8_t keys[256];
 
 static void post(uint32_t hwnd, uint32_t msg, uint32_t wp, uint32_t lp) {
@@ -191,7 +192,7 @@ static void pump(void) {
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
         case SDL_EVENT_QUIT:
-        case SDL_EVENT_WINDOW_CLOSE_REQUESTED: post(HWND_MAIN, 0x0010u, 0, 0); break;              /* WM_CLOSE */
+        case SDL_EVENT_WINDOW_CLOSE_REQUESTED: g_quitting = 1; post(HWND_MAIN, 0x0010u, 0, 0); break;   /* WM_CLOSE */
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             post(HWND_MAIN, 0x001Cu, 1, 0); post(HWND_MAIN, 0x0006u, 1, 0); post(HWND_MAIN, 0x0007u, 0, 0);
             break;

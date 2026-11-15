@@ -210,6 +210,7 @@ static int is_scaleform(uint32_t h) {
 static void aspect_scale(float *sx, float *sy) {
     *sx = *sy = 1.0f;
     if (g_dev.rs[7] && g_dev.ds) depth_draws++;
+    return;                       /* Rayman Origins: UbiArt places its own 2D for the wide aspect (game.h) */
     if (g_aspect < 16.0f / 9.0f + 0.002f || cur.h != g_dev.bb_h || cur.w * 9 < cur.h * 16 * 98 / 100) return;
     if (g_dev.rs[7] && g_dev.ds) return;                                         /* 3D */
     int scene = depth_draws_prev >= 16 || depth_draws >= 16;
