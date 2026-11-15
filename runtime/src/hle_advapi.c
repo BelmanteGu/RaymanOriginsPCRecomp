@@ -99,12 +99,22 @@ uint32_t x_RegCreateKeyExW(CPU *c, uint32_t a) {                 /* (root, subke
 uint32_t x_RegCloseKey(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
 /* The video settings are the runtime's, not the registry's: the window size (RAYMAN_RES=WxH, or 21:9 that fits the
  * desktop) and windowed mode (RAYMAN_FULLSCREEN=1 for full screen). Returns 1 if `name` was one of them. */
-static int video_setting(uint32_t wname, uint32_t type_out, uint32_t data, uint32_t size_io) {
+static RegVal *find_val(uint32_t hkey, uint32_t wname, int create);
+int screen_size(uint32_t *w, uint32_t *h);
+static int video_setting(uint32_t hkey, uint32_t wname, uint32_t type_out, uint32_t data, uint32_t size_io) {
     char vn[64];
     w2utf8(wname, vn, sizeof vn);
     int w = GAME_DEFAULT_W, h = GAME_DEFAULT_H;
+#ifdef __ANDROID__
+    uint32_t sw, sh;                                               /* 720 lines in the screen's shape */
+    if (screen_size(&sw, &sh) && sh) { h = sh < 720 ? (int)sh : 720; w = (int)((uint64_t)sw * (uint32_t)h / sh) & ~7; }
+#endif
     const char *r = getenv("RAYMAN_RES");
     if (r) sscanf(r, "%dx%d", &w, &h);
+    else if (strcasecmp(vn, "FullScreen")) {                       /* a size chosen in the game's Options wins */
+        RegVal *v = find_val(hkey, wname, 0);
+        if (v) return 0;
+    }
     char text[16];
     if (!strcasecmp(vn, "ScreenWidth") || !strcasecmp(vn, "ScreenHeight")) {
         snprintf(text, sizeof text, "%d", !strcasecmp(vn, "ScreenWidth") ? w : h);
@@ -116,7 +126,11 @@ static int video_setting(uint32_t wname, uint32_t type_out, uint32_t data, uint3
     }
     if (!strcasecmp(vn, "FullScreen")) {
         if (type_out) W32(type_out, 4);                            /* REG_DWORD */
+#ifdef __ANDROID__
+        if (data) W32(data, 1u);
+#else
         if (data) W32(data, getenv("RAYMAN_FULLSCREEN") ? 1u : 0u);
+#endif
         if (size_io) W32(size_io, 4);
         return 1;
     }
@@ -124,7 +138,7 @@ static int video_setting(uint32_t wname, uint32_t type_out, uint32_t data, uint3
 }
 uint32_t x_RegQueryValueExW(CPU *c, uint32_t a) {                /* (key, name, 0, &type, data, &size) */
     (void)c;
-    if (ARG(1) && video_setting(ARG(1), ARG(3), ARG(4), ARG(5))) return 0;
+    if (ARG(1) && video_setting(ARG(0), ARG(1), ARG(3), ARG(4), ARG(5))) return 0;
     pthread_mutex_lock(&reg_lock);
     RegVal *v = find_val(ARG(0), ARG(1), 0);
     uint32_t r = 2;                                                /* ERROR_FILE_NOT_FOUND */

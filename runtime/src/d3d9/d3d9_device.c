@@ -39,15 +39,34 @@ static uint32_t GetAdapterIdentifier(CPU *c, uint32_t a) {
     W32(p + 1096, 1);
     return 0;
 }
-static uint32_t modes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1280, 1024}, {1366, 768},
-                                    {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160},
-                                    {1920, 800}, {2560, 1080}, {3440, 1440}, {3840, 1600}, {5120, 1440},   /* 21:9, 32:9 */
-                                    {0, 0}};                         /* the screen's shape (USF_AUTO_RES), filled at first use */
-#define NMODES (modes[15][0] ? 16 : 15)
+/* The resolutions the game's own Options offer (it lists them with EnumAdapterModes). On Android: the screen's
+ * shape at its full height and at 900, 720 and 540 lines (720 is the default, game.h); on the PC the usual 16:9 and
+ * 21:9 / 32:9 sizes plus the default window. */
+static uint32_t modes[16][2];
+static int nmodes;
+static void add_mode(uint32_t w, uint32_t h) {
+    w &= ~7u;
+    for (int i = 0; i < nmodes; i++) if (modes[i][0] == w && modes[i][1] == h) return;
+    if (nmodes < 16 && w >= 640 && h >= 360) { modes[nmodes][0] = w; modes[nmodes][1] = h; nmodes++; }
+}
+#define NMODES nmodes
 static void auto_mode(void) {
-    int usf_auto_resolution(uint32_t *w, uint32_t *h);
-    static int done;
-    if (!done) { done = 1; usf_auto_resolution(&modes[15][0], &modes[15][1]); }
+    int screen_size(uint32_t *w, uint32_t *h);
+    if (nmodes) return;
+    uint32_t sw = 0, sh = 0;
+#ifdef __ANDROID__
+    if (screen_size(&sw, &sh) && sh) {
+        static const uint32_t lines[] = {540, 720, 900};
+        for (int i = 0; i < 3; i++) if (lines[i] < sh) add_mode((uint32_t)((uint64_t)sw * lines[i] / sh), lines[i]);
+        add_mode(sw, sh);
+    }
+#else
+    static const uint32_t pc[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}, {1920, 822},
+                                     {2560, 1080}, {3440, 1440}, {5120, 1440}};
+    for (unsigned i = 0; i < sizeof pc / sizeof pc[0]; i++) add_mode(pc[i][0], pc[i][1]);
+    if (screen_size(&sw, &sh)) add_mode(sw, sh);
+#endif
+    if (!nmodes) add_mode(1280, 720);
 }
 static uint32_t GetAdapterModeCount(CPU *c, uint32_t a) { (void)c; (void)a; auto_mode(); return NMODES; }
 static uint32_t EnumAdapterModes(CPU *c, uint32_t a) {
@@ -122,11 +141,13 @@ static void apply_aspect(uint32_t w, uint32_t h) {
         float x = 0, y = 0;
         if (sscanf(e, "%f:%f", &x, &y) == 2 && y > 0) a = x / y; else if (sscanf(e, "%f", &x) == 1 && x > 0) a = x;
     }
-    if (a < 16.0f / 9.0f + 0.002f) return;                      /* 16:9 or narrower: the game as it was */
+    if (a < 16.0f / 9.0f + 0.002f) a = 16.0f / 9.0f;              /* 16:9 or narrower: the game as it was */
     if (a > 32.0f / 9.0f) a = 32.0f / 9.0f;
     g_aspect = a;
     float inv = 1.0f / a;
-    if (R32(GAME_ASPECT_PAIR) == 0x3FE38E39u && R32(GAME_ASPECT_PAIR + 4) == 0x3F100000u) {
+    static int verified = -1;                                  /* the pair holds 16/9, 9/16 before the first change */
+    if (verified < 0) verified = R32(GAME_ASPECT_PAIR) == 0x3FE38E39u && R32(GAME_ASPECT_PAIR + 4) == 0x3F100000u;
+    if (verified) {
         memcpy(HOST(GAME_ASPECT_PAIR), &a, 4);
         memcpy(HOST(GAME_ASPECT_PAIR + 4), &inv, 4);
     } else fprintf(stderr, "usf: ultrawide: the 16/9 pair is not where expected; left as it is\n");
@@ -283,7 +304,13 @@ static uint32_t GetDisplayMode(CPU *c, uint32_t a) { (void)c; W32(ARG(2), g_dev.
 static uint32_t GetCreationParameters(CPU *c, uint32_t a) { (void)c; W32(ARG(1), 0); W32(ARG(1) + 4, 1); W32(ARG(1) + 8, 0x00010010u); W32(ARG(1) + 12, 0x40); return 0; }
 static uint32_t GetSwapChain(CPU *c, uint32_t a) { (void)c; if (!g_swapchain) g_swapchain = d3d_new(OBJ_SWAPCHAIN, NULL); W32(ARG(2), g_swapchain); return 0; }
 static uint32_t GetNumberOfSwapChains(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
-static uint32_t Reset(CPU *c, uint32_t a) { (void)c; make_backbuffer(ARG(1)); r_init(g_dev.bb_w, g_dev.bb_h); return 0; }
+static uint32_t Reset(CPU *c, uint32_t a) {                     /* a new size (the game's Options): the aspect follows */
+    (void)c;
+    make_backbuffer(ARG(1));
+    r_init(g_dev.bb_w, g_dev.bb_h);
+    apply_aspect(g_dev.bb_w, g_dev.bb_h);
+    return 0;
+}
 /* The game advances one step per presented frame, so frames are paced: 60 per second (RAYMAN_FPS to change, 0 = no
  * limit; another rate also sets the engine's app-loop and logic rates, so RAYMAN_FPS=120 is 120 real logic steps
  * per second, not interpolation), whatever the display's refresh (a 144 Hz screen would otherwise run the game 2.4 times too fast). A frame

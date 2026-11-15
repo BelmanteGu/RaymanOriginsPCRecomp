@@ -64,6 +64,16 @@ static void sdl_init(void) {
 
 /* USF_AUTO_RES (always on Android): the game's resolution follows the screen's shape at 720 lines (a 19.5:9 phone:
  * 1560x720), so the picture fills the screen and the ultrawide code gives the extra width. 0 if not asked. */
+/* The screen (landscape) in pixels: the desktop on the PC, the display on Android. 0 if SDL cannot tell. */
+int screen_size(uint32_t *w, uint32_t *h);
+int screen_size(uint32_t *w, uint32_t *h) {
+    sdl_init();
+    const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+    if (!m || m->w <= 0 || m->h <= 0) return 0;
+    *w = (uint32_t)(m->w > m->h ? m->w : m->h);
+    *h = (uint32_t)(m->w > m->h ? m->h : m->w);
+    return 1;
+}
 int usf_auto_resolution(uint32_t *w, uint32_t *h);
 int usf_auto_resolution(uint32_t *w, uint32_t *h) {
 #ifndef __ANDROID__
