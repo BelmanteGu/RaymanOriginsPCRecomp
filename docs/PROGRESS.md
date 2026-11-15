@@ -74,3 +74,33 @@ Verified on Linux x86-64 (1920x1080 144 Hz laptop), 2026-11-15:
   1,000–6,000 zero crossings per second (music and effects, not noise). Not yet checked by ear.
 - **Exit.** The game's shutdown crashes in the destructor of an online-layer object (`0x8F8660`); after the player
   closes the window a fault ends the process normally (saves are made at checkpoints). The cause is still open.
+
+## 2026-11-15 — Discovery from relocations only, Bink movies, real 120 fps, unattended soak
+
+**Discovery.** Two kinds of false function starts were found by looking at why `0x746150` was missed: dwords in
+`.data` that only look like code addresses ("vtable" starts at `0x746153`, `0x74616D`, inside the real function),
+and relocated jump-table addresses inside instructions (`jmp [eax*4+table]`). Now a data dword is a pointer only if
+the linker relocated it, and a relocation in code is a function pointer only as the immediate of `push` / `mov`.
+45,190 functions (the 4,600 fewer were false ones); every start the runtime had reported during play
+(`0x8BB4A0`, `0x90AB20`, `0x746150`) is now found statically.
+
+**Soak.** `tools/soak.sh`: the game headless with a "monkey" (Enter through menus, then hold right, jump, attack).
+30,000 frames (8 min): the first level several times, the world map, a second level; no stop.
+
+![Soak run, one frame every 1,500](media/m5-soak-30000.jpg)
+
+**Bink movies.** The game's player was read from its code (0x7FF750..0x7FFAB8): it locks its own L8 textures,
+registers them as Bink frame buffers (Y, cR, cB per set at +0x18, 0x30 bytes a set), calls BinkWait / BinkDoFrame /
+BinkGetRects every frame and ends when BinkGetSummary's TotalPlayedFrames reaches TotalFrames. hle_bink.c does that
+with FFmpeg (it decodes Bink 1, 1280x720 at 29.97 fps, and Bink audio) on a decoding thread, sound on its own SDL
+stream. Colors correct (cR = V, cB = U), sound present (peaks 0.39).
+
+![Ubisoft and UbiArt logos, the opening](media/m5-bink-movies.jpg)
+
+**120 fps, real.** The engine has its own frame rates (strings "Game logic 30/50/60fps", "App loop ..."):
+`SetFrameRate` (0x796E60) and `SetLogicRate` (0x796E80) write fps and 1/fps to `.data 0xA8A9D8..E4`; the logic step
+(`0xA8A9E4`) is read in 65 places. `RAYMAN_FPS=120` sets all four and paces Present at 120: 120 logic steps per
+second, not interpolated frames. Checked: the same script at 60 and at 120 fps (every input frame doubled) puts
+Rayman in the same place at the same real time (top 60, bottom 120):
+
+![60 vs 120 fps at the same moments](media/m5-60-vs-120.jpg)

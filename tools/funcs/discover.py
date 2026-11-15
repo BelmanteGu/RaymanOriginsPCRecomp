@@ -182,6 +182,8 @@ class Discovery:
                 v = img.u32(a)
                 if v is None or not img.in_text(v):
                     continue
+                if img.reloc_targets and a not in img.reloc_targets:
+                    continue                 # no relocation: a number that looks like an address, not a pointer
                 vtable_like = any(img.in_text(img.u32(a + k) or 0) for k in (-4, 4))
                 aligned = not self.claimed(v) or self.insn_start[v - img.text_start]   # not mid-instruction
                 if aligned and (vtable_like or img.bytes_at(v, 3).startswith(PROLOGUES)) and v not in self.starts:
@@ -197,9 +199,33 @@ class Discovery:
                 if not self.claimed(v) and self.add_start(v, "code-ref"):
                     added += 1
         for at, v in img.reloc_targets.items():      # relocated pointers to code nobody covers: functions
-            if img.in_text(v) and not self.claimed(v) and v not in self.starts and self.add_start(v, "reloc"):
+            if not img.in_text(v) or self.claimed(v) or v in self.starts or not self.reloc_is_pointer(at, v):
+                continue
+            if self.add_start(v, "reloc"):
                 added += 1
         return added
+
+    def reloc_is_pointer(self, at, v):
+        """A relocation is a code pointer when it sits in data (vtables, callback tables) or is the immediate of an
+        instruction (`push offset f`, `mov reg, offset f`). In code, a relocated displacement (`jmp [eax*4+table]`,
+        `mov eax, [table+ecx*4]`) is the address of data: a jump or index table, not a function."""
+        if not self.img.in_text(at):
+            return True
+        if not hasattr(self, "_md"):
+            from capstone import CS_ARCH_X86, CS_MODE_32, Cs
+            self._md = Cs(CS_ARCH_X86, CS_MODE_32)
+            self._md.detail = True
+        from capstone import x86 as X
+        for back in range(1, 8):                     # the instruction that contains the relocated dword
+            a = at - back
+            for ins in self._md.disasm(self.img.bytes_at(a, 16), a, 1):
+                if a + ins.size < at + 4:
+                    break
+                for op in ins.operands:
+                    if op.type == X.X86_OP_IMM and (op.imm & 0xFFFFFFFF) == v and ins.mnemonic in ("push", "mov"):
+                        return True
+                return False
+        return False
 
     def gap_seeds(self):
         """Candidates in unclaimed .text: the first byte after each padding run (`int3`/`nop`) and every

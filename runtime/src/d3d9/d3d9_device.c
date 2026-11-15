@@ -285,13 +285,19 @@ static uint32_t GetSwapChain(CPU *c, uint32_t a) { (void)c; if (!g_swapchain) g_
 static uint32_t GetNumberOfSwapChains(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
 static uint32_t Reset(CPU *c, uint32_t a) { (void)c; make_backbuffer(ARG(1)); r_init(g_dev.bb_w, g_dev.bb_h); return 0; }
 /* The game advances one step per presented frame, so frames are paced: 60 per second (RAYMAN_FPS to change, 0 = no
- * limit), whatever the display's refresh (a 144 Hz screen would otherwise run the game 2.4 times too fast). A frame
+ * limit; another rate also sets the engine's app-loop and logic rates, so RAYMAN_FPS=120 is 120 real logic steps
+ * per second, not interpolation), whatever the display's refresh (a 144 Hz screen would otherwise run the game 2.4 times too fast). A frame
  * that comes late resets the schedule instead of being caught up. */
 static void pace(void) {
     static double next;
     static int fps = -1;
     if (fps < 0) { const char *e = getenv("RAYMAN_FPS"); fps = e ? atoi(e) : 60; }
     if (fps <= 0) return;
+    if (fps != 60) {                                           /* the engine's own rates follow (game.h) */
+        float f = (float)fps, dt = 1.0f / f;
+        uint32_t v = GAME_RATE_VARS;
+        if (RF32(v) != f || RF32(v + 4) != f) { WF32(v, f); WF32(v + 4, f); WF32(v + 8, dt); WF32(v + 12, dt); }
+    }
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + ts.tv_nsec / 1e9, period = 1.0 / fps;

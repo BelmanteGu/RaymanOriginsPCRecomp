@@ -17,6 +17,10 @@
  * from the Xbox 360 port, where the same pair is read by the engine's fit function). Wider screens: both changed. */
 #define GAME_ASPECT_PAIR 0x00A2C1B4u
 
+/* UbiArt's frame rates (.data): the app loop's fps and 1/fps, then the game logic's fps and 1/fps (the logic step,
+ * read in 65 places), set by the engine's SetFrameRate (0x796E60) as 60 and 1/60. 120 fps = all four at 120. */
+#define GAME_RATE_VARS 0x00A8A9D8u
+
 /* The window when the player sets nothing: 21:9 that fits a 1920-wide desktop. RAYMAN_RES=WxH changes it. */
 #define GAME_DEFAULT_W 1920
 #define GAME_DEFAULT_H 822
