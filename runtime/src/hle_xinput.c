@@ -1,10 +1,12 @@
 /* XInput for the game: physical controllers through SDL3, and the keyboard as a virtual pad on player 1.
  *
- * What it does: XInputGetState fills XINPUT_STATE from the SDL gamepad of that index; player 1 also gets the
- * keyboard: arrows / WASD = d-pad, U I O = LP MP HP (X, Y, RB), J K L = LK MK HK (A, B, RT), Enter = Start,
- * Backspace / Esc = Back, Q = LB (3 punches), E = LT (3 kicks). XInputGetCapabilities reports a standard gamepad.
- * Street Fighter IV's default pad layout maps X/Y/RB to light/medium/heavy punch and A/B/RT to the kicks.
- * What it does not do: rumble (XInputSetState is accepted and ignored), more than 4 pads.
+ * What it does: XInputGetState fills XINPUT_STATE from the SDL gamepad of that index (any pad SDL knows: Xbox,
+ * PlayStation, Switch, generic USB/Bluetooth; plugged before or after the game starts). Rayman only gives default
+ * buttons to XInput pads (hle_wmi.c makes the game see one), and then stops reading the keyboard itself, so player 1
+ * also gets the keyboard in the game's own PC layout: arrows = d-pad, Space / Enter = A (jump, confirm), S = X
+ * (attack), D = Y, Backspace = B (back), Shift = RT (run), Esc = Start (pause), Tab = Back.
+ * USF_PADLOG=1 prints player 1's buttons when they change. What it does not do: rumble (XInputSetState is accepted
+ * and ignored), more than 4 pads.
  */
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -24,6 +26,7 @@ static void open_pads(void) {
         if (pads[i] && !SDL_GamepadConnected(pads[i])) { SDL_CloseGamepad(pads[i]); pads[i] = NULL; }
         if (!pads[i] && i < n) pads[i] = SDL_OpenGamepad(ids[i]);
     }
+    if (getenv("USF_PADLOG")) { static int ln = -1; if (n != ln) fprintf(stderr, "pad: SDL gamepads %d pads[0]=%p (%s)\n", n, (void *)pads[0], SDL_GetError()); ln = n; }
     SDL_free(ids);
 }
 
@@ -88,24 +91,26 @@ uint32_t x_XInputGetState(CPU *c, uint32_t a) {
         lx = axis(g, SDL_GAMEPAD_AXIS_LEFTX, 0); ly = axis(g, SDL_GAMEPAD_AXIS_LEFTY, 1);
         rx = axis(g, SDL_GAMEPAD_AXIS_RIGHTX, 0); ry = axis(g, SDL_GAMEPAD_AXIS_RIGHTY, 1);
     }
-    if (idx == 0) {                                            /* the keyboard is player 1 */
+    if (idx == 0) {      /* the keyboard is player 1, in Rayman's own PC layout (the game drops it once a pad is XInput) */
         connected = 1;
         const bool *k = SDL_GetKeyboardState(NULL);
-        if (k[SDL_SCANCODE_UP] || k[SDL_SCANCODE_W]) b |= 0x0001;
-        if (k[SDL_SCANCODE_DOWN] || k[SDL_SCANCODE_S]) b |= 0x0002;
-        if (k[SDL_SCANCODE_LEFT] || k[SDL_SCANCODE_A]) b |= 0x0004;
-        if (k[SDL_SCANCODE_RIGHT] || k[SDL_SCANCODE_D]) b |= 0x0008;
-        if (k[SDL_SCANCODE_RETURN]) b |= 0x0010;
-        if (k[SDL_SCANCODE_BACKSPACE] || k[SDL_SCANCODE_ESCAPE]) b |= 0x0020;
-        if (k[SDL_SCANCODE_U]) b |= 0x4000;                    /* LP = X */
-        if (k[SDL_SCANCODE_I]) b |= 0x8000;                    /* MP = Y */
-        if (k[SDL_SCANCODE_O]) b |= 0x0200;                    /* HP = RB */
-        if (k[SDL_SCANCODE_J]) b |= 0x1000;                    /* LK = A */
-        if (k[SDL_SCANCODE_K]) b |= 0x2000;                    /* MK = B */
-        if (k[SDL_SCANCODE_L]) rt = 255;                       /* HK = RT */
-        if (k[SDL_SCANCODE_Q]) b |= 0x0100;                    /* 3P = LB */
-        if (k[SDL_SCANCODE_E]) lt = 255;                       /* 3K = LT */
+        if (k[SDL_SCANCODE_UP]) b |= 0x0001;
+        if (k[SDL_SCANCODE_DOWN]) b |= 0x0002;
+        if (k[SDL_SCANCODE_LEFT]) b |= 0x0004;
+        if (k[SDL_SCANCODE_RIGHT]) b |= 0x0008;
+        if (k[SDL_SCANCODE_ESCAPE]) b |= 0x0010;                         /* pause = Start */
+        if (k[SDL_SCANCODE_TAB]) b |= 0x0020;                            /* Back */
+        if (k[SDL_SCANCODE_SPACE] || k[SDL_SCANCODE_RETURN]) b |= 0x1000; /* jump / confirm = A */
+        if (k[SDL_SCANCODE_BACKSPACE]) b |= 0x2000;                      /* back = B */
+        if (k[SDL_SCANCODE_S]) b |= 0x4000;                              /* attack = X */
+        if (k[SDL_SCANCODE_D]) b |= 0x8000;                              /* Y */
+        if (k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT]) rt = 255;  /* run = RT */
         b |= scripted(&lt, &rt);
+    }
+    if (getenv("USF_PADLOG") && idx == 0) {                     /* debug: player 1's state when it changes */
+        static uint16_t lb = 0xFFFF;
+        if (b != lb) fprintf(stderr, "pad: XInputGetState(0) sdl=%p buttons %04x lx %d ly %d\n", (void *)g, b, lx, ly);
+        lb = b;
     }
     if (!connected) return 1167;                               /* ERROR_DEVICE_NOT_CONNECTED */
     W32(st, ++packet);

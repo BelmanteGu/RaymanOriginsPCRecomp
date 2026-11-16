@@ -350,9 +350,11 @@ uint32_t x_CoInitializeEx(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
 uint32_t x_CoInitialize(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
 uint32_t x_CoUninitialize(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
 uint32_t xaudio2_create(uint32_t clsid, uint32_t out);
+uint32_t wmi_create(uint32_t clsid, uint32_t out);
 uint32_t x_CoCreateInstance(CPU *c, uint32_t a) {
     (void)c;
     if (xaudio2_create(ARG(0), ARG(4)) == 0) return 0;       /* XAudio2 2.7 (the game's SoundAdapter_XAudio) */
+    if (wmi_create(ARG(0), ARG(4)) == 0) return 0;           /* WbemLocator: the XInput pad check (hle_wmi.c) */
     const uint8_t *g = HOST(ARG(0));
     usf_log("CoCreateInstance {%08x-%04x-%04x-...}: class not registered\n", R32(ARG(0)), g[4] | g[5] << 8, g[6] | g[7] << 8);
     if (ARG(4)) W32(ARG(4), 0);

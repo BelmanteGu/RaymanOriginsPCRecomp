@@ -123,6 +123,12 @@ static uint32_t pad_state(CPU *c, uint32_t a) {
     btn[0] |= (sb & 0x1000) != 0; btn[1] |= (sb & 0x2000) != 0; btn[2] |= (sb & 0x4000) != 0; btn[3] |= (sb & 0x8000) != 0;
     btn[4] |= (sb & 0x0100) != 0; btn[5] |= (sb & 0x0200) != 0;   /* LB, RB: run */
     btn[6] |= (sb & 0x20) != 0; btn[7] |= (sb & 0x0410) != 0;
+    if (getenv("USF_PADLOG")) {
+        static char last[128]; char now[128];
+        snprintf(now, sizeof now, "btn %d%d%d%d%d%d%d%d%d%d dpad %d%d%d%d lx %d ly %d", btn[0], btn[1], btn[2], btn[3], btn[4], btn[5],
+                 btn[6], btn[7], btn[8], btn[9], up, down, left, right, lx / 8192, ly / 8192);
+        if (strcmp(now, last)) { fprintf(stderr, "pad: DI sdl=%p n=%u %s\n", (void *)sdlpad, n, now); strcpy(last, now); }
+    }
     int32_t v[6] = {scale(lx), scale(ly), scale(z), scale(rx), scale(ry), scale(0)};
     for (int i = 0; i < 6 && 4u * (uint32_t)i + 4 <= n; i++) W32(p + 4u * (uint32_t)i, (uint32_t)v[i]);
     int pov = -1;                                          /* hundredths of a degree, clockwise from up */
@@ -187,6 +193,18 @@ static uint32_t pad_enum_objects(CPU *c, uint32_t a) {
 }
 static HleFn vt_pad[32] = {qi, one, one, pad_caps, pad_enum_objects, ok, pad_setprop, ok, ok, pad_state, kb_data,
                            pad_setformat, ok, ok, ok, pad_info, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok, ok};
+/* USF_PADLOG: log every pad method the game calls (debug) */
+static uint32_t pad_trace(int slot, CPU *c, uint32_t a) {
+    static unsigned cnt[32];
+    if (getenv("USF_PADLOG") && cnt[slot]++ < 3) fprintf(stderr, "pad: DI slot %d (call %u)\n", slot, cnt[slot]);
+    return vt_pad[slot](c, a);
+}
+#define T(n) static uint32_t tr##n(CPU *c, uint32_t a) { return pad_trace(n, c, a); }
+T(0) T(1) T(2) T(3) T(4) T(5) T(6) T(7) T(8) T(9) T(10) T(11) T(12) T(13) T(14) T(15) T(16) T(17) T(18) T(19) T(20)
+T(21) T(22) T(23) T(24) T(25) T(26) T(27) T(28) T(29) T(30) T(31)
+#undef T
+static HleFn vt_pad_tr[32] = {tr0, tr1, tr2, tr3, tr4, tr5, tr6, tr7, tr8, tr9, tr10, tr11, tr12, tr13, tr14, tr15, tr16,
+                              tr17, tr18, tr19, tr20, tr21, tr22, tr23, tr24, tr25, tr26, tr27, tr28, tr29, tr30, tr31};
 static const uint8_t PAD_GUID[16] = {'U', 'S', 'F', 'P', 'A', 'D', 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
 
 static const uint8_t GUID_SysKeyboard[16] = {0x61, 0x2B, 0x1D, 0x6F, 0xA0, 0xD5, 0xCF, 0x11, 0xBF, 0xC7, 0x44, 0x45,
@@ -195,7 +213,7 @@ static const uint8_t GUID_SysKeyboard[16] = {0x61, 0x2B, 0x1D, 0x6F, 0xA0, 0xD5,
 static uint32_t create_device(CPU *c, uint32_t a) {
     (void)c;
     if (!memcmp(HOST(ARG(1)), PAD_GUID, 16)) {
-        if (!pad_obj) pad_obj = obj_new_n("IDirectInputDevice8 (pad)", 32, vt_pad, na_kb, 16);
+        if (!pad_obj) pad_obj = obj_new_n("IDirectInputDevice8 (pad)", 32, getenv("USF_PADLOG") ? vt_pad_tr : vt_pad, na_kb, 16);
         W32(ARG(2), pad_obj);
         fprintf(stderr, "usf: DirectInput game controller created (keyboard + SDL pad)\n");
         return 0;
@@ -213,11 +231,12 @@ static uint32_t create_device(CPU *c, uint32_t a) {
 /* EnumDevices(type, callback, ref, flags): one game controller (DI8DEVCLASS_GAMECTRL 4), the keyboard (3) */
 static uint32_t enum_devices(CPU *c, uint32_t a) {
     uint32_t type = ARG(1), cb = ARG(2), ref = ARG(3);
-    if (type == 0 || type == 4 || type == 0x15) {
+    if ((type == 0 || type == 4 || type == 0x15) && !getenv("USF_NO_DIPAD")) {
         uint32_t inst = gcalloc(0x44C);                           /* DIDEVICEINSTANCEW */
         W32(inst, 0x44C);
         memcpy(HOST(inst + 4), PAD_GUID, 16);
-        memcpy(HOST(inst + 20), PAD_GUID, 16);                 /* guidProduct: not an XInput VID/PID */
+        static const uint8_t X360[16] = {0x5E, 0x04, 0x8E, 0x02, 0, 0, 0, 0, 0, 0, 'P', 'I', 'D', 'V', 'I', 'D'};
+        memcpy(HOST(inst + 20), X360, 16);     /* guidProduct: the Xbox 360 pad WMI reports, so the game reads it as XInput */
         W32(inst + 36, 0x0215);
         utf8_to_w("Controller", inst + 40, 260);
         utf8_to_w("Controller", inst + 560, 260);

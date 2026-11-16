@@ -136,3 +136,21 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
 - A 50,000-frame soak ran at ~16 fps and a later check at ~37 fps: three USFIV-PC test runs of another session were
   using the CPU and the shared GPU at the same time. With the machine free the same runs hold 60 fps (earlier
   entries). Measurements are only meaningful on an idle machine.
+
+## 2026-11-15 — USB / Bluetooth controllers: the game reads them as XInput pads
+
+- Report: a USB pad (a generic "Zikway HID gamepad") did nothing in the game, although SDL saw it and its buttons
+  reached the DirectInput device (`USF_PADLOG=1` shows them).
+- Cause, in the game's code: the pad manager (vtable 0x9F1ED8) enumerates DirectInput game controllers and first
+  asks **WMI** for PnP devices whose DeviceID has `IG_` (Microsoft's IsXInputDevice sample, 0x4B60C0). A pad whose
+  guidProduct matches one of them is an XInput pad (read with `XInputGetState`, 0x4B6C60); any other is read with
+  DirectInput. The default controls (0x4B4F91) are set **only for XInput pads**: a DirectInput pad has no mapping
+  and is ignored. Our CoCreateInstance had no WMI, so no pad was ever XInput and `XInputGetState` was never called.
+- Fix: `hle_wmi.c` answers `CLSID_WbemLocator` with one Win32_PNPEntity of an Xbox 360 pad
+  (`VID_045E&PID_028E&IG_00`), and the DirectInput pad carries that guidProduct. The game now reads player 1 with
+  `XInputGetState(0)`, which is any SDL gamepad (Xbox, PlayStation, Switch, generic), plugged before or after start.
+- With an XInput pad the game no longer reads the keyboard itself, so the keyboard is folded into pad 0 in the
+  game's PC layout: arrows, Space / Enter = jump / confirm, S = attack, Shift = run, Backspace = back, Esc = pause.
+- Checked: a 6,000-frame scripted run reaches a level and plays through the XInput path only.
+
+![Scripted input through XInputGetState: title, then playing](media/m7-xinput-pad.jpg)
