@@ -178,3 +178,15 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   | frames over 16.7 ms | 24 | 4 |
 
 ![DXVK native: menu and first level](media/m8-dxvk-native.jpg)
+
+## 2026-11-19 — Touch controls with the Xbox 360 port's drawings, drawn through DXVK
+
+- The on-screen controls now use the themed drawings made for the Xbox 360 port (jump, attack, back, run, pause, stick
+  base and knob; `runtime/assets/touch/`). `tools/touch_art.py` scales them to 256x256 premultiplied RGBA
+  (`private/include/touch_art.rgba`, made by the build scripts) and `touch_art.c` embeds that block; `touch.c` draws
+  them bilinear, lighter and a little smaller while pressed. Opacity steps are now 50 / 75 / 100 %.
+- The layer is blended by `dxvk_overlay.c`: on DXVK's device, a dynamic texture refilled only when the picture changes
+  and one fixed-function quad before Present, with the game's state saved in a state block and its render target and
+  depth buffer put back.
+
+![The drawn controls over the UbiArt logo (RAYMAN_TOUCH=1, a scripted thumb on the stick)](media/m8-touch-art.jpg)

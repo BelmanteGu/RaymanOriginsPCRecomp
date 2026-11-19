@@ -27,6 +27,7 @@ extern SDL_Window *g_window;
 extern char g_repo_dir[1024];
 void apply_aspect(uint32_t w, uint32_t h);
 void game_pace(void);
+void dxb_overlay_draw(void *dev);
 
 static uint32_t gpu_epoch = 1;
 static uint64_t copied_buf, copied_tex_in, copied_tex_out;   /* bytes copied by locks (statistics) */
@@ -843,6 +844,7 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
             return r;
         }
         case 17: {                                        /* Present(src, dst, window, dirty) */
+            dxb_overlay_draw(n);                          /* the touch layer over the frame (dxvk_overlay.c) */
             uint32_t r = (uint32_t)CALL(n, 17, ARG(1) ? (uint64_t)(uintptr_t)HOST(ARG(1)) : 0,
                                         ARG(2) ? (uint64_t)(uintptr_t)HOST(ARG(2)) : 0, ARG(3) ? (uint64_t)(uintptr_t)g_window : 0,
                                         ARG(4) ? (uint64_t)(uintptr_t)HOST(ARG(4)) : 0, 0, 0, 0, 0, 0, 0, 0);

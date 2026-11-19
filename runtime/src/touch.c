@@ -6,8 +6,8 @@
  * game reads through its keyboard (GetKeyState) and its DirectInput pad. Pause sends Start, which opens the game's
  * own pause menu; while it is open, the port's settings appear at the bottom of the screen, also by touch:
  * on-screen controls on/off, their size and opacity, and 60 / 120 fps. They are kept in <data>/port_settings.txt.
- * The layer is drawn on the CPU into an RGBA picture (shapes and a built-in 5x7 font) that vk_overlay.c blends over
- * the frame. On Android it is on by default; on the PC with RAYMAN_TOUCH=1 (the mouse is a finger).
+ * The layer is drawn on the CPU into an RGBA picture that dxvk_overlay.c blends over the frame: the controls are
+ * the drawings made for the Xbox 360 port (touch_art.c), the settings bar uses shapes and a built-in 5x7 font. On Android it is on by default; on the PC with RAYMAN_TOUCH=1 (the mouse is a finger).
  * What it does not do: put entries into the game's own option screens (the game's own Options keep its settings,
  * resolution included); haptics.
  */
@@ -31,13 +31,15 @@ static pthread_mutex_t lk = PTHREAD_MUTEX_INITIALIZER;
 typedef struct { long id; float x, y, x0, y0; int role; } Finger;   /* role: 0 none, 1 stick, 2+ button index */
 static Finger fingers[10];
 
-typedef struct { float x, y, r; uint16_t bit; const char *label; int toggle; } Button;
+enum { ART_JUMP, ART_ATTACK, ART_BACK, ART_RUN, ART_PAUSE, ART_STICK_BASE, ART_STICK_KNOB, ART_SIZE = 256 };
+extern const uint8_t touch_art[];                       /* touch_art.c */
+typedef struct { float x, y, r; uint16_t bit; int art; int toggle; } Button;
 static Button buttons[] = {
-    {0.89f, 0.72f, 0.075f, B_A, "A", 0},        /* jump */
-    {0.79f, 0.84f, 0.065f, B_X, "X", 0},        /* attack */
-    {0.80f, 0.58f, 0.055f, B_B, "B", 0},        /* back / attack */
-    {0.94f, 0.47f, 0.050f, B_RUN, "RUN", 1},    /* run toggle */
-    {0.955f, 0.08f, 0.040f, B_START, "II", 0},  /* pause */
+    {0.89f, 0.72f, 0.075f, B_A, ART_JUMP, 0},        /* jump */
+    {0.79f, 0.84f, 0.065f, B_X, ART_ATTACK, 0},      /* attack */
+    {0.80f, 0.58f, 0.055f, B_B, ART_BACK, 0},        /* back / attack */
+    {0.94f, 0.47f, 0.050f, B_RUN, ART_RUN, 1},       /* run toggle */
+    {0.955f, 0.08f, 0.040f, B_START, ART_PAUSE, 0},  /* pause */
 };
 #define NB (int)(sizeof buttons / sizeof buttons[0])
 static float aspect = 16.0f / 9.0f;                     /* of the screen: circles stay round */
@@ -80,7 +82,7 @@ int touch_active(void) { return active; }
 typedef struct { float x0, y0, x1, y1; } Rect;
 static Rect setting_rect(int i) { return (Rect){0.06f + 0.225f * (float)i, 0.86f, 0.06f + 0.225f * (float)i + 0.205f, 0.96f}; }
 static void setting_text(int i, char *out, size_t n) {
-    static const char *lv[3] = {"S", "M", "L"}, *op[3] = {"25%", "50%", "75%"};
+    static const char *lv[3] = {"S", "M", "L"}, *op[3] = {"50%", "75%", "100%"};
     switch (i) {
     case 0: snprintf(out, n, "CONTROLS: %s", set.on ? "ON" : "OFF"); break;
     case 1: snprintf(out, n, "SIZE: %s", lv[set.size]); break;
@@ -221,14 +223,29 @@ static void blend(int x, int y, uint32_t rgb, float a) {
     p[0] = (uint8_t)(r + p[0] * (1 - a)); p[1] = (uint8_t)(g + p[1] * (1 - a)); p[2] = (uint8_t)(b + p[2] * (1 - a));
     p[3] = (uint8_t)(255 * a + p[3] * (1 - a));
 }
-static void circle(float cx, float cy, float r, uint32_t rgb, float a, int ring) {
-    int x0 = (int)(cx - r - 2), x1 = (int)(cx + r + 2), y0 = (int)(cy - r - 2), y1 = (int)(cy + r + 2);
-    for (int y = y0; y <= y1; y++)
-        for (int x = x0; x <= x1; x++) {
-            float d = sqrtf((x - cx) * (x - cx) + (y - cy) * (y - cy));
-            float cov = r + 0.5f - d;
-            if (ring) cov = fminf(cov, d - (r - (float)ring) + 0.5f);
-            if (cov > 0) blend(x, y, rgb, a * fminf(cov, 1.0f));
+/* one drawing centred on (cx, cy): its circle (84% of the picture: the art keeps a margin) has radius r; bilinear,
+ * premultiplied; bright: pressed (lighter) */
+static void sprite(int art, float cx, float cy, float r, float a, int bright) {
+    const uint8_t *src = touch_art + (size_t)art * ART_SIZE * ART_SIZE * 4;
+    float half = r / 0.84f, k = (float)ART_SIZE / (2 * half);
+    int x0 = (int)(cx - half), x1 = (int)(cx + half), y0 = (int)(cy - half), y1 = (int)(cy + half);
+    for (int y = y0 < 0 ? 0 : y0; y <= y1 && y < ph; y++)
+        for (int x = x0 < 0 ? 0 : x0; x <= x1 && x < pw; x++) {
+            float u = ((float)x + 0.5f - (cx - half)) * k - 0.5f, v = ((float)y + 0.5f - (cy - half)) * k - 0.5f;
+            if (u < 0 || v < 0 || u > ART_SIZE - 1 || v > ART_SIZE - 1) continue;
+            int iu = (int)u, iv = (int)v, ju = iu + 1 < ART_SIZE ? iu + 1 : iu, jv = iv + 1 < ART_SIZE ? iv + 1 : iv;
+            float fu = u - (float)iu, fv = v - (float)iv, c[4];
+            for (int ch = 0; ch < 4; ch++)
+                c[ch] = (src[4 * (iv * ART_SIZE + iu) + ch] * (1 - fu) + src[4 * (iv * ART_SIZE + ju) + ch] * fu) * (1 - fv) +
+                        (src[4 * (jv * ART_SIZE + iu) + ch] * (1 - fu) + src[4 * (jv * ART_SIZE + ju) + ch] * fu) * fv;
+            if (c[3] < 1) continue;
+            uint8_t *p = pix + 4 * ((size_t)y * pw + x);
+            float sa = c[3] / 255.0f * a, lift = bright ? 1.35f : 1.0f;
+            for (int ch = 0; ch < 3; ch++) {
+                float o = fminf(c[ch] * a * lift, 255.0f * sa) + p[ch] * (1 - sa);
+                p[ch] = (uint8_t)(o > 255 ? 255 : o);
+            }
+            p[3] = (uint8_t)(255 * sa + p[3] * (1 - sa));
         }
 }
 static void rect(float x0, float y0, float x1, float y1, uint32_t rgb, float a) {
@@ -254,21 +271,19 @@ const uint8_t *touch_picture(int w, int h, int *changed) {
     if (w != pw || h != ph) { free(pix); pix = calloc((size_t)w * h, 4); pw = w; ph = h; dirty = 1; }
     if (!dirty) { pthread_mutex_unlock(&lk); return pix; }
     memset(pix, 0, (size_t)w * h * 4);
-    float alpha = set.opacity == 0 ? 0.25f : set.opacity == 2 ? 0.75f : 0.5f, s = scale();
+    float alpha = set.opacity == 0 ? 0.5f : set.opacity == 2 ? 1.0f : 0.75f, s = scale();
     for (int i = 0; i < NB; i++) {
         Button *b = &buttons[i];
         if (!set.on && b->bit != B_START) continue;
         float cx = b->x * (float)w, cy = b->y * (float)h, r = b->r * s * (float)h;
         int down = (held & b->bit) || (b->toggle && run_on);
-        circle(cx, cy, r, down ? 0xFFD040u : 0x202020u, alpha * (down ? 0.9f : 0.6f), 0);
-        circle(cx, cy, r, 0xFFFFFFu, alpha, (int)(r * 0.08f) + 2);
-        text(b->label, cx, cy, fmaxf(2.0f, r / 9.0f), 0xFFFFFFu, fminf(1.0f, alpha + 0.3f));
+        sprite(b->art, cx, cy, down ? r * 0.94f : r, alpha, down);
     }
     for (int k = 0; k < 10 && set.on; k++)                     /* the stick under the thumb */
         if (fingers[k].id && fingers[k].role == 1) {
             float r = 0.13f * s * (float)h;
-            circle(fingers[k].x0 * (float)w, fingers[k].y0 * (float)h, r, 0xFFFFFFu, alpha * 0.8f, (int)(r * 0.06f) + 2);
-            circle(fingers[k].x * (float)w, fingers[k].y * (float)h, r * 0.45f, 0xFFFFFFu, alpha * 0.8f, 0);
+            sprite(ART_STICK_BASE, fingers[k].x0 * (float)w, fingers[k].y0 * (float)h, r, alpha, 0);
+            sprite(ART_STICK_KNOB, fingers[k].x * (float)w, fingers[k].y * (float)h, r * 0.42f, alpha, 0);
         }
     if (paused) {
         for (int i = 0; i < 4; i++) {

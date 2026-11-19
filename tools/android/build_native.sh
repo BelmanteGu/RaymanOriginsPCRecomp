@@ -29,7 +29,8 @@ FF=private/android/ffmpeg/out                 # tools/android/build_ffmpeg.sh (m
 if [ -f $FF/lib/libavcodec.a ]; then FFC="-I$FF/include"; FFL="$FF/lib/libavformat.a $FF/lib/libavcodec.a $FF/lib/libswscale.a $FF/lib/libswresample.a $FF/lib/libavutil.a"
 else FFC="-DUSF_NO_FFMPEG"; FFL=""; fi
 CFLAGS="-O2 -g -fPIC -Wall -Wno-unused-parameter -ffp-contract=off -fwrapv -fno-strict-aliasing $FFC
-        -Iruntime/include -Iruntime/src -I$SDL3_SRC/include -I$NDK/sources/third_party/shaderc/libshaderc/include"
+        -Iruntime/include -Iruntime/src -Iprivate/include -I$SDL3_SRC/include -I$NDK/sources/third_party/shaderc/libshaderc/include"
+[ private/include/touch_art.rgba -nt tools/touch_art.py ] || .venv/bin/python -I tools/touch_art.py   # the touch controls' drawings
 for f in runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c; do
   $CC $CFLAGS -c "$f" -o "$OBJ/$(basename "$f" .c).o" &
 done
