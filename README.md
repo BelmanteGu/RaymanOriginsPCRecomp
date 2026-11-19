@@ -5,7 +5,7 @@
 **The Windows (Steam/Ubisoft) version of Rayman Origins, statically recompiled to native code.**
 
 Every function of `Rayman Origins.exe` (x86-32, UbiArt Framework) translated to C and compiled for x86-64 and ARM64,
-with its own Windows runtime and a Direct3D 9 → Vulkan 1.1 renderer. Linux first, Android next. No emulation, no Wine,
+with its own Windows runtime; Direct3D 9 goes to DXVK built as a native library (Vulkan). Linux and Android. No emulation, no Wine,
 no FEX, no box64.
 
 </div>
@@ -35,7 +35,8 @@ This one starts from the **PC build** because that is the copy people can still 
 | ✅ **60 / 120 fps** | paced Present; 120 = the engine's own logic rate at 120 (real steps, not interpolation) |
 | ✅ **Sound and movies** | XAudio2 (PCM, MS ADPCM); Bink movies through FFmpeg, with their soundtrack |
 | ✅ **Touch** | on-screen controls and the port's settings drawn in the game (under the game's pause menu) |
-| 🟡 **Android** | APK builds (arm64, Vulkan 1.1); not run on a phone yet |
+| ✅ **Android** | runs on the Galaxy S23 (arm64, DXVK for Vulkan 1.1), touch controls with the Xbox 360 port's drawings |
+| ✅ **Controllers** | any SDL gamepad (USB / Bluetooth) as an XInput pad, plugged before or after start |
 
 Log: [docs/PROGRESS.md](docs/PROGRESS.md) · Android: [docs/ANDROID.md](docs/ANDROID.md) · plan:
 [docs/PLAN.md](docs/PLAN.md) · rules: [docs/RULES.md](docs/RULES.md)
@@ -62,12 +63,12 @@ Rayman Origins.exe (x86-32) ──► function discovery ──► lifter ──
 runtime (C)
  ├─ kernel32, user32, MSVCR90/MSVCP90 (host libc), DirectInput, XInput, XAudio2, WinSock/Quazal (offline) …
  ├─ D3DX9: math, ID3DXEffect; HLSL compiles answered with the game's own precompiled shaders
- ├─ Direct3D 9 ──► Vulkan 1.1   (D3D bytecode ──► SPIR-V)
+ ├─ Direct3D 9 ──► DXVK native (PC: 3.1.1; Android: dxvk-native 1.9.2b for Vulkan 1.1) ──► Vulkan
  ├─ binkw32 ──► FFmpeg (Bink video/audio)
  └─ touch layer (controls, port settings) drawn over the frame
 ```
 
 The pipeline and most of the runtime come from
 [UltraStreetFighterIVPCRecomp](https://github.com/BelmanteGu/UltraStreetFighterIVPCRecomp) (same compiler family,
-same D3D9 → Vulkan path). Knowledge of the UbiArt engine (renderer adapter, widescreen, frieze/water quirks, Android
+same lifting path; the DXVK bridge comes from the Sonic & All-Stars Racing Transformed PC port). Knowledge of the UbiArt engine (renderer adapter, widescreen, frieze/water quirks, Android
 app) comes from the Xbox 360 port.

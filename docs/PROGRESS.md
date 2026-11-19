@@ -190,3 +190,11 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   depth buffer put back.
 
 ![The drawn controls over the UbiArt logo (RAYMAN_TOUCH=1, a scripted thumb on the stick)](media/m8-touch-art.jpg)
+
+## 2026-11-19 — Android with DXVK: runs on the Galaxy S23
+
+- The APK now carries `libdxvk_d3d9.so` built by `tools/android/build_dxvk_mobile.sh` (dxvk-native 1.9.2b with
+  mobile-GPU patches, SDL3 window system, Vulkan 1.1; the build the Sonic & All-Stars Racing Transformed port runs on
+  the S23). The runtime loads it next to `libmain.so` through the same bridge as on the PC.
+- Installed on the Galaxy S23 with the game folder in `Games/RaymanOrigins`: **the user played it, it runs well**,
+  with the drawn touch controls.
