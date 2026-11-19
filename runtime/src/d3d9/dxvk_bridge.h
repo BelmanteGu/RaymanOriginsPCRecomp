@@ -59,4 +59,33 @@ static inline DxbFn dxb_method(void *nat, int slot) { return ((DxbFn *)*(void **
 uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, uint32_t levels, uint32_t usage,
                           uint32_t pool, uint32_t info, uint32_t out, int kind);   /* dxvk_d3dx.c */
 
+/* bridge internals shared by dxvk_bridge.c and dxvk_locks.c (locks, buffer rings, draw-time copies) */
+int dxl_block_format(uint32_t f);
+void dxl_lock_push(Wrap *w, uint32_t key, uint32_t guest, uint32_t size, void *host);
+Lock *dxl_lock_pop(Wrap *w, uint32_t key);
+uint32_t dxl_lock_rect(Wrap *w, int slot, uint64_t face, uint64_t level, uint32_t g_lr, uint32_t g_rect,                           uint32_t flags, const uint32_t *desc, uint32_t key);
+int dxl_lock_readback(Wrap *w, uint32_t g_lr, uint32_t g_rect, uint32_t flags, const uint32_t *desc);
+uint32_t dxl_unlock(Wrap *w, int slot, uint32_t key, uint64_t a1, uint64_t a2);
+uint32_t dxl_lock_box(Wrap *w, int slot, uint64_t level, uint32_t g_lb, uint32_t g_box, uint32_t flags,                          uint32_t depth, uint32_t key);
+uint32_t dxl_ring_discard(Wrap *w, const uint32_t *desc, uint32_t flags);
+void dxl_ring_free(Wrap *w);
+void dxl_flush_range(Wrap *w, uint32_t lo, uint32_t hi);
+uint32_t dxl_index_size(Wrap *ib);
+void dxl_index_range(Wrap *ib, uint32_t start, uint32_t n, uint32_t isz, uint32_t *lo, uint32_t *hi);
+uint32_t dxl_vcount(uint32_t type, uint32_t prims);
+void dxl_flush_draw(int indexed, uint32_t type, int32_t base, uint32_t first, uint32_t num, uint32_t start_index,                        uint32_t prims);
+extern uint32_t gpu_epoch, stream_buf[16], stream_off[16], stream_stride[16], stream_freq[16], cur_ib;
+extern uint64_t copied_buf, copied_tex_in, copied_tex_out, checked_bytes, checked_locks;
+extern int usf_stalls;
+uint32_t dxl_lock_buffer(Wrap *w, uint32_t off, uint32_t size, uint32_t g_pp, uint32_t flags);
+uint32_t dxl_unlock_buffer(Wrap *w);
+extern Wrap *wraps;
+extern uint32_t device_guest;
+void hput(void *p, uint32_t v);
+void hdel(void *p);
+double now_ms(void);
+uint32_t usf_ms(void);
+#include <pthread.h>
+extern pthread_mutex_t wlock;
+
 #endif
