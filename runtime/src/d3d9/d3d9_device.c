@@ -134,7 +134,8 @@ static uint32_t make_backbuffer(uint32_t pp) {
  * it). USF_ASPECT: auto (the back buffer's shape when wider than 16:9; the default), 16:9 (the game as it was), 21:9,
  * 32:9, or a number. Nothing in the game's files changes. */
 float g_aspect = 16.0f / 9.0f;
-static void apply_aspect(uint32_t w, uint32_t h) {
+void apply_aspect(uint32_t w, uint32_t h);
+void apply_aspect(uint32_t w, uint32_t h) {
     const char *e = getenv("USF_ASPECT");
     float a = h ? (float)w / (float)h : 16.0f / 9.0f;
     if (e && strcmp(e, "auto")) {
@@ -190,6 +191,9 @@ HleFn vt_d3d9[17] = {qi, addref, release, ok, GetAdapterCount, GetAdapterIdentif
 uint32_t x_Direct3DCreate9(CPU *c, uint32_t a) {
     (void)c;
     usf_log("Direct3DCreate9(%u)\n", ARG(0));
+    int dxb_enabled(void);
+    uint32_t dxb_create9(uint32_t sdk);
+    if (dxb_enabled()) return dxb_create9(ARG(0));             /* DXVK native (dxvk_bridge.c), the renderer */
     if (!g_d3d9_guest) g_d3d9_guest = d3d_new(OBJ_D3D9, NULL);
     return g_d3d9_guest;
 }
@@ -315,7 +319,8 @@ static uint32_t Reset(CPU *c, uint32_t a) {                     /* a new size (t
  * limit; another rate also sets the engine's app-loop and logic rates, so RAYMAN_FPS=120 is 120 real logic steps
  * per second, not interpolation), whatever the display's refresh (a 144 Hz screen would otherwise run the game 2.4 times too fast). A frame
  * that comes late resets the schedule instead of being caught up. */
-static void pace(void) {
+void game_pace(void);
+void game_pace(void) {
     static double next;
     const char *e = getenv("RAYMAN_FPS");                        /* read every frame: the touch settings change it */
     int fps = e ? atoi(e) : 60;
@@ -337,8 +342,17 @@ static void pace(void) {
         while (nanosleep(&sl, &sl) && errno == EINTR) {}
     }
     next += period;
+    static FILE *ft;                                           /* RAYMAN_FTLOG=<file>: each frame's interval (ms) */
+    static double prev;
+    if (!ft && getenv("RAYMAN_FTLOG")) ft = fopen(getenv("RAYMAN_FTLOG"), "w");
+    if (ft) {
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        double t = (double)ts.tv_sec + ts.tv_nsec / 1e9;
+        if (prev) fprintf(ft, "%u %.3f\n", g_dev.frames, (t - prev) * 1e3);
+        prev = t;
+    }
 }
-static uint32_t Present(CPU *c, uint32_t a) { (void)c; (void)a; r_present(); pace(); g_dev.frames++; return 0; }
+static uint32_t Present(CPU *c, uint32_t a) { (void)c; (void)a; r_present(); game_pace(); g_dev.frames++; return 0; }
 static uint32_t GetBackBuffer(CPU *c, uint32_t a) { (void)c; W32(ARG(4), g_dev.backbuffer); return 0; }
 static uint32_t GetRasterStatus(CPU *c, uint32_t a) { (void)c; memset(HOST(ARG(2)), 0, 8); return 0; }
 static uint32_t SetRenderTarget(CPU *c, uint32_t a) { (void)c; if (ARG(1) < 4) g_dev.rt[ARG(1)] = ARG(2); return 0; }

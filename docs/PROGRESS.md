@@ -154,3 +154,27 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
 - Checked: a 6,000-frame scripted run reaches a level and plays through the XInput path only.
 
 ![Scripted input through XInputGetState: title, then playing](media/m7-xinput-pad.jpg)
+
+## 2026-11-19 — Direct3D 9 through DXVK native (the renderer from now on)
+
+- The own D3D9 → Vulkan layer stuttered (frames of 90+ ms). As in the Sonic & All-Stars Racing Transformed PC port,
+  the game's Direct3D 9 now goes to **DXVK 3.1.1 built as a native Linux library** (`private/deps/dxvk`,
+  `build-native`, D3D9 only, SDL3 window system). The bridge (`runtime/src/d3d9/dxvk_bridge.c`, `dxvk_sigs.c`,
+  `dxvk_d3dx.c`, from that port; `dxvk_glue.c` for this runtime) wraps each DXVK object in a guest object, converts
+  arguments by each method's signature and hands locks a guest copy.
+- Kept from this port: Hor+ aspect at CreateDevice / Reset, the 60 / 120 fps pacer and engine rates after Present
+  (DXVK's limiter off), `D3DXCreateTexture` through the device (DXT sizes rounded up to 4x4 blocks as D3DX does: DXVK
+  refuses a 2x1 DXT1 texture, and the game then crashed on the null texture), `D3DXLoadSurfaceFromMemory` through
+  LockRect.
+- Verified (headless): Bink logos, menu, first level at 21:9; the RTX 3050 is used (the own layer only saw the Intel).
+- **Frame times**, level, 120 fps, power-saver, same scripted input (`RAYMAN_FTLOG`):
+
+  | | own renderer | DXVK |
+  |---|---|---|
+  | mean fps | 115.9 | 119.0 |
+  | frame-time std dev | 2.72 ms | 0.91 ms |
+  | p99 | 15.6 ms | 11.0 ms |
+  | worst | 93.5 ms | 17.9 ms |
+  | frames over 16.7 ms | 24 | 4 |
+
+![DXVK native: menu and first level](media/m8-dxvk-native.jpg)

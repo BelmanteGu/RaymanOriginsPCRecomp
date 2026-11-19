@@ -12,11 +12,13 @@
 #include <string.h>
 
 #include "d3d9.h"
+#include "dxvk_bridge.h"
 
 #define D3DXERR_INVALIDDATA 0x88760B59u
 #define FOURCC(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
 
-static uint32_t dds_format(uint32_t h) {          /* h: guest address of the DDS header (after "DDS ") */
+uint32_t d3dx_dds_format(uint32_t h);                    /* also used by dxvk_d3dx.c */
+uint32_t d3dx_dds_format(uint32_t h) {          /* h: guest address of the DDS header (after "DDS ") */
     uint32_t pf = h + 72, flags = R32(pf + 4), fourcc = R32(pf + 8), bits = R32(pf + 12);
     uint32_t rm = R32(pf + 16), gm = R32(pf + 20), bm = R32(pf + 24), am = R32(pf + 28);
     if (flags & 4u) return fourcc;                                  /* DDPF_FOURCC: DXTn, or a D3DFMT number */
@@ -44,7 +46,7 @@ static uint32_t from_dds(uint32_t src, uint32_t size, uint32_t want_levels, uint
     if (size < 128 || R32(src) != FOURCC('D', 'D', 'S', ' ')) return D3DXERR_INVALIDDATA;
     uint32_t h = src + 4;
     uint32_t height = R32(h + 8), width = R32(h + 12), mips = R32(h + 24), caps2 = R32(h + 108);
-    uint32_t fmt = dds_format(h);
+    uint32_t fmt = d3dx_dds_format(h);
     if (!fmt || !width || !height) return D3DXERR_INVALIDDATA;
     if (!mips) mips = 1;
     if (getenv("USF_TEXLOG")) fprintf(stderr, "DDS %ux%u mips %u fmt %u flags %x pitch %u bits %u size %u\n", width, height, mips, fmt, R32(h + 4), R32(h + 16),
@@ -76,7 +78,7 @@ static uint32_t from_dds(uint32_t src, uint32_t size, uint32_t want_levels, uint
 
 /* (device, data, size, w, h, mips, usage, format, pool, filter, mipfilter, colorkey, info, palette, out) */
 uint32_t x_D3DXCreateTextureFromFileInMemoryEx(CPU *c, uint32_t a) {
-    (void)c;
+    if (dxb_enabled()) return dxb_d3dx_texture(c, ARG(0), ARG(1), ARG(2), ARG(5), ARG(6), ARG(8), ARG(12), ARG(14), 2);
     if (getenv("USF_TEXLOG")) fprintf(stderr, "D3DXCreateTextureFromFileInMemoryEx w %x h %x mips %x fmt %x pool %u filter %x mipfilter %x\n",
                                       ARG(3), ARG(4), ARG(5), ARG(7), ARG(8), ARG(9), ARG(10));
     const char *dump = getenv("USF_TEXDUMP");                       /* dir: keep every DDS the game loads (private/) */
@@ -94,7 +96,7 @@ uint32_t x_D3DXCreateTextureFromFileInMemoryEx(CPU *c, uint32_t a) {
 
 /* (device, data, size, edge, mips, usage, format, pool, filter, mipfilter, colorkey, info, palette, out) */
 uint32_t x_D3DXCreateCubeTextureFromFileInMemoryEx(CPU *c, uint32_t a) {
-    (void)c;
+    if (dxb_enabled()) return dxb_d3dx_texture(c, ARG(0), ARG(1), ARG(2), ARG(4), ARG(5), ARG(7), ARG(11), ARG(13), 3);
     return from_dds(ARG(1), ARG(2), ARG(4), ARG(5), ARG(7), ARG(11), ARG(13), 1);
 }
 
@@ -144,35 +146,53 @@ static int px_put(uint32_t f, uint8_t *p, const uint8_t c[4]) {
 /* (dest surface, dest palette, dest rect, src memory, src format, src pitch, src palette, src rect, filter, key)
  * Copies the source rectangle to the destination rectangle's corner (no scaling); converts between the formats above. */
 uint32_t x_D3DXLoadSurfaceFromMemory(CPU *c, uint32_t a) {
-    (void)c;
-    D3DObj *d = d3d_obj(ARG(0));
-    if (!d) return 0x8876086Cu;
+    uint32_t surf = ARG(0), dfmt, dw, dh, dpitch, dsize, dmem, lr = 0;
+    D3DObj *d = NULL;
+    if (dxb_enabled()) {                                   /* a DXVK surface: its description, then a lock (guest copy) */
+        uint32_t desc = gcalloc(32);
+        lr = gcalloc(8);
+        uint32_t vt = R32(surf);
+        guest_call(c, R32(vt + 12 * 4), CONV_STDCALL, 2, surf, desc);                    /* GetDesc */
+        dfmt = R32(desc); dw = R32(desc + 24); dh = R32(desc + 28);
+        gfree(desc);
+        if (guest_call(c, R32(vt + 13 * 4), CONV_STDCALL, 4, surf, lr, 0, 0)) { gfree(lr); return 0x8876086Cu; }   /* LockRect */
+        dpitch = R32(lr); dmem = R32(lr + 4); dsize = dpitch * (d3d_format_block(dfmt) ? (dh + 3) / 4 : dh);
+    } else {
+        d = d3d_obj(surf);
+        if (!d) return 0x8876086Cu;
+        dfmt = d->format; dw = d->width; dh = d->height; dpitch = d->pitch[0]; dsize = d->size[0]; dmem = d->mem[0][0];
+    }
     uint32_t sfmt = ARG(4), spitch = ARG(5), drect = ARG(2), rect = ARG(7);
     uint32_t sx = rect ? R32(rect) : 0, sy = rect ? R32(rect + 4) : 0;
-    uint32_t w = rect ? R32(rect + 8) - sx : d->width, h = rect ? R32(rect + 12) - sy : d->height;
+    uint32_t w = rect ? R32(rect + 8) - sx : dw, h = rect ? R32(rect + 12) - sy : dh;
     uint32_t dx = drect ? R32(drect) : 0, dy = drect ? R32(drect + 4) : 0;
-    if (dx + w > d->width) w = d->width > dx ? d->width - dx : 0;
-    if (dy + h > d->height) h = d->height > dy ? d->height - dy : 0;
-    uint32_t sbpp = d3d_format_bpp(sfmt) / 8, dbpp = d3d_format_bpp(d->format) / 8;
-    if (sfmt == d->format) {
+    if (dx + w > dw) w = dw > dx ? dw - dx : 0;
+    if (dy + h > dh) h = dh > dy ? dh - dy : 0;
+    uint32_t sbpp = d3d_format_bpp(sfmt) / 8, dbpp = d3d_format_bpp(dfmt) / 8;
+    if (sfmt == dfmt) {
         int blk = d3d_format_block(sfmt);
         uint32_t rows = blk ? (h + 3) / 4 : h, row = d3d_pitch(sfmt, w);
         uint32_t soff = blk ? sy / 4 * spitch + d3d_pitch(sfmt, sx) : sy * spitch + sx * sbpp;
-        uint32_t doff = blk ? dy / 4 * d->pitch[0] + d3d_pitch(sfmt, dx) : dy * d->pitch[0] + dx * dbpp;
-        for (uint32_t y = 0; y < rows && doff + y * d->pitch[0] < d->size[0]; y++)
-            memcpy(HOST(d->mem[0][0] + doff + y * d->pitch[0]), HOST(ARG(3) + soff + y * spitch), row);
+        uint32_t doff = blk ? dy / 4 * dpitch + d3d_pitch(sfmt, dx) : dy * dpitch + dx * dbpp;
+        for (uint32_t y = 0; y < rows && doff + y * dpitch < dsize; y++)
+            memcpy(HOST(dmem + doff + y * dpitch), HOST(ARG(3) + soff + y * spitch), row);
     } else {
         uint8_t px[4];
-        if (d3d_format_block(sfmt) || d3d_format_block(d->format) || !px_get(sfmt, (const uint8_t *)"\0\0\0\0", px) ||
-            !px_put(d->format, px, px)) {
-            usf_log("D3DXLoadSurfaceFromMemory: format %u -> %u not converted\n", sfmt, d->format);
-            return 0;
+        if (d3d_format_block(sfmt) || d3d_format_block(dfmt) || !px_get(sfmt, (const uint8_t *)"\0\0\0\0", px) ||
+            !px_put(dfmt, px, px)) {
+            usf_log("D3DXLoadSurfaceFromMemory: format %u -> %u not converted\n", sfmt, dfmt);
+            h = 0;
         }
         for (uint32_t y = 0; y < h; y++) {
             const uint8_t *sp = HOST(ARG(3) + (sy + y) * spitch + sx * sbpp);
-            uint8_t *dp = HOST(d->mem[0][0] + (dy + y) * d->pitch[0] + dx * dbpp);
-            for (uint32_t x = 0; x < w; x++) { px_get(sfmt, sp + x * sbpp, px); px_put(d->format, dp + x * dbpp, px); }
+            uint8_t *dp = HOST(dmem + (dy + y) * dpitch + dx * dbpp);
+            for (uint32_t x = 0; x < w; x++) { px_get(sfmt, sp + x * sbpp, px); px_put(dfmt, dp + x * dbpp, px); }
         }
+    }
+    if (lr) {
+        guest_call(c, R32(R32(surf) + 14 * 4), CONV_STDCALL, 1, surf);                   /* UnlockRect */
+        gfree(lr);
+        return 0;
     }
     d->version++;
     D3DObj *p = d3d_obj(d->parent);

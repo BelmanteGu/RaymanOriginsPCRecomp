@@ -209,8 +209,22 @@ uint32_t x_D3DXPlaneIntersectLine(CPU *c, uint32_t a) {          /* (out, plane,
 
 /* ---- textures and shader compilation ---- */
 uint32_t x_D3DXCreateTexture(CPU *c, uint32_t a) {              /* (device, w, h, mips, usage, format, pool, &tex) */
-    (void)c;
     uint32_t w = ARG(1) ? ARG(1) : 1, h = ARG(2) ? ARG(2) : 1;
+    int dxb_enabled(void);
+    if (dxb_enabled())                                        /* the device's own CreateTexture (DXVK through the bridge) */
+    {
+        uint32_t lv = ARG(3), us = ARG(4), fmt = ARG(5), pool = ARG(6), out = ARG(7);   /* (the call reuses this stack) */
+        if ((fmt & 0x00FFFFFFu) == 0x00545844u) {          /* DXT1..5: D3DX rounds the size up to whole 4x4 blocks */
+            w = (w + 3) & ~3u; h = (h + 3) & ~3u;
+            uint32_t most = 1;
+            for (uint32_t m = w > h ? w : h; m > 1; m >>= 1) most++;
+            if (lv > most) lv = most;
+        }
+        uint32_t r = guest_call(c, R32(R32(ARG(0)) + 23 * 4), CONV_STDCALL, 9, ARG(0), w, h, lv, us, fmt, pool, out, 0);
+        if (r || getenv("USF_TEXLOG"))
+            fprintf(stderr, "usf: D3DXCreateTexture %ux%u levels %u usage %x format %x pool %u -> %08x\n", w, h, lv, us, fmt, pool, r);
+        return r;
+    }
     W32(ARG(7), d3d_create_texture(OBJ_TEXTURE, w, h, ARG(3), ARG(4), ARG(5), ARG(6)));
     return 0;
 }
