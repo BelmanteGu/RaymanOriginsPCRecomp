@@ -19,15 +19,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL3/SDL.h>
+
 #include "hle.h"
 
 enum { B_UP = 0x0001, B_DOWN = 0x0002, B_LEFT = 0x0004, B_RIGHT = 0x0008, B_START = 0x0400 /* pause: Esc + Start */, B_A = 0x1000,
        B_B = 0x2000, B_X = 0x4000, B_RUN = 0x0200, B_MENU = 0x8000u << 1 /* not a pad bit: the port's menu */ };
 
-typedef struct { int on, size, opacity, fps120, runhold, lang; } Settings;   /* size 0..2, opacity 0..2 */
-static Settings set = {1, 1, 1, 0, 0, 0};
+/* size 0..2, opacity 0..2; stick 0 floating / 1 fixed; the launcher's keys too (GameMenu.java) */
+typedef struct { int on, size, opacity, fps120, runhold, lang, stick, padhides, showfps, vibration; } Settings;
+static Settings set = {1, 1, 1, 0, 0, 0, 0, 1, 0, 1};
 static int active;                                     /* the layer exists (Android, or RAYMAN_TOUCH on the PC) */
-static int menu_open, run_on, dirty = 1;
+static int menu_open, editing, run_on, dirty = 1, pad_hidden;
+int port_open_menu(void);                               /* port_android.c: the launcher's Options over the game */
+void port_haptic(void);
 static uint16_t held;                                  /* pad bits from fingers this frame */
 static pthread_mutex_t lk = PTHREAD_MUTEX_INITIALIZER;
 
@@ -46,6 +51,14 @@ static Button buttons[] = {
     {0.955f, 0.215f, 0.050f, B_MENU, ART_MENU},      /* the port's menu, under pause (clear of the game's HUD) */
 };
 #define NB (int)(sizeof buttons / sizeof buttons[0])
+/* where each button (and, last, the fixed stick) is: the defaults above, or where the player put it (b<i>x / b<i>y in
+ * port_settings.txt, thousandths of the screen) */
+static const float STICK_X = 0.14f, STICK_Y = 0.70f, STICK_R = 0.13f;
+static float bx[NB + 1], by[NB + 1];
+static void default_places(void) {
+    for (int i = 0; i < NB; i++) { bx[i] = buttons[i].x; by[i] = buttons[i].y; }
+    bx[NB] = STICK_X; by[NB] = STICK_Y;
+}
 static float aspect = 16.0f / 9.0f;                     /* of the screen: circles stay round */
 static int always_shown(const Button *b) { return b->bit == B_START || b->bit == B_MENU; }
 
@@ -59,11 +72,18 @@ static void save(void) {
     FILE *f = fopen(p, "r");
     while (f && fgets(line, sizeof line, f))
         if (strncmp(line, "touch=", 6) && strncmp(line, "size=", 5) && strncmp(line, "opacity=", 8) && strncmp(line, "fps120=", 7) &&
-            strncmp(line, "runhold=", 8) && strlen(keep) + strlen(line) < sizeof keep) strcat(keep, line);
+            strncmp(line, "runhold=", 8) && !(line[0] == 'b' && line[1] >= '0' && line[1] <= '9') &&
+            strlen(keep) + strlen(line) < sizeof keep) strcat(keep, line);
     if (f) fclose(f);
     f = fopen(p, "w");
     if (f) {
-        fprintf(f, "touch=%d\nsize=%d\nopacity=%d\nfps120=%d\nrunhold=%d\n%s", set.on, set.size, set.opacity, set.fps120, set.runhold, keep);
+        fprintf(f, "touch=%d\nsize=%d\nopacity=%d\nfps120=%d\nrunhold=%d\n", set.on, set.size, set.opacity, set.fps120, set.runhold);
+        for (int i = 0; i <= NB; i++) {
+            float dx = i < NB ? buttons[i].x : STICK_X, dy = i < NB ? buttons[i].y : STICK_Y;
+            if (fabsf(bx[i] - dx) > 0.001f || fabsf(by[i] - dy) > 0.001f)
+                fprintf(f, "b%dx=%d\nb%dy=%d\n", i, (int)lroundf(bx[i] * 1000), i, (int)lroundf(by[i] * 1000));
+        }
+        fputs(keep, f);
         fclose(f);
     }
 }
@@ -86,7 +106,28 @@ static void load(void) {
     set.fps120 = port_setting("fps120", set.fps120);
     set.runhold = port_setting("runhold", set.runhold) ? 1 : 0;
     set.lang = port_setting("lang", 0);
+    set.stick = port_setting("stick", 0) ? 1 : 0;
+    set.padhides = port_setting("padhides", 1) ? 1 : 0;
+    set.showfps = port_setting("showfps", 0) ? 1 : 0;
+    set.vibration = port_setting("vibration", 1) ? 1 : 0;
+    default_places();
+    for (int i = 0; i <= NB; i++) {
+        char k[8];
+        snprintf(k, sizeof k, "b%dx", i);
+        int x = port_setting(k, -1);
+        snprintf(k, sizeof k, "b%dy", i);
+        int y = port_setting(k, -1);
+        if (x >= 0 && x <= 1000 && y >= 0 && y <= 1000) { bx[i] = (float)x / 1000; by[i] = (float)y / 1000; }
+    }
 }
+/* after the launcher's Options screen saved over the game (port_android.c) */
+void touch_reload(void);
+void touch_reload(void) {           /* (the finger on the gear was lifted over the Options screen: forget them all) */
+    pthread_mutex_lock(&lk); load(); run_on = 0; memset(fingers, 0, sizeof fingers); held = 0; dirty = 1; pthread_mutex_unlock(&lk);
+}
+/* moving the buttons: drag them; RESET and DONE at the top (port_android.c starts it from the Options screen) */
+void touch_edit_layout(void);
+void touch_edit_layout(void) { pthread_mutex_lock(&lk); editing = 1; menu_open = 0; memset(fingers, 0, sizeof fingers); dirty = 1; pthread_mutex_unlock(&lk); }
 void touch_init(void);
 void touch_init(void) {
 #ifdef __ANDROID__
@@ -101,15 +142,15 @@ int touch_active(void);
 int touch_active(void) { return active; }
 
 /* ---- the port's menu ---- */
-enum { T_TITLE, T_CONTROLS, T_SIZE, T_OPACITY, T_RUN, T_CLOSE, T_ON, T_OFF, T_S, T_M, T_L, T_TOGGLE, T_HOLD, T_N };
+enum { T_TITLE, T_CONTROLS, T_SIZE, T_OPACITY, T_RUN, T_CLOSE, T_ON, T_OFF, T_S, T_M, T_L, T_TOGGLE, T_HOLD, T_DRAG, T_RESET, T_DONE, T_N };
 /* the launcher's language order: en fr de es it pt pl ru nl cs hu ja; the 5x7 font has no accents (written without) */
 static const char *const words[][T_N] = {
-    {"PORT OPTIONS", "TOUCH CONTROLS", "SIZE", "OPACITY", "RUN", "CLOSE", "ON", "OFF", "SMALL", "MEDIUM", "LARGE", "TOGGLE", "HOLD"},
-    {"OPTIONS DU PORT", "COMMANDES TACTILES", "TAILLE", "OPACITE", "COURIR", "FERMER", "OUI", "NON", "PETIT", "MOYEN", "GRAND", "BASCULE", "MAINTENIR"},
-    {"PORT-OPTIONEN", "TOUCH-STEUERUNG", "GROESSE", "DECKKRAFT", "RENNEN", "SCHLIESSEN", "AN", "AUS", "KLEIN", "MITTEL", "GROSS", "UMSCHALTEN", "HALTEN"},
-    {"OPCIONES DEL PORT", "CONTROLES TACTILES", "TAMANO", "OPACIDAD", "CORRER", "CERRAR", "SI", "NO", "PEQUENO", "MEDIANO", "GRANDE", "ALTERNAR", "MANTENER"},
-    {"OPZIONI DEL PORT", "CONTROLLI TOUCH", "DIMENSIONE", "OPACITA", "CORSA", "CHIUDI", "SI", "NO", "PICCOLO", "MEDIO", "GRANDE", "ALTERNA", "TIENI"},
-    {"OPCOES DO PORT", "CONTROLES NA TELA", "TAMANHO", "OPACIDADE", "CORRER", "FECHAR", "SIM", "NAO", "PEQUENO", "MEDIO", "GRANDE", "ALTERNAR", "SEGURAR"},
+    {"PORT OPTIONS", "TOUCH CONTROLS", "SIZE", "OPACITY", "RUN", "CLOSE", "ON", "OFF", "SMALL", "MEDIUM", "LARGE", "TOGGLE", "HOLD", "DRAG THE BUTTONS", "RESET", "DONE"},
+    {"OPTIONS DU PORT", "COMMANDES TACTILES", "TAILLE", "OPACITE", "COURIR", "FERMER", "OUI", "NON", "PETIT", "MOYEN", "GRAND", "BASCULE", "MAINTENIR", "DEPLACEZ LES BOUTONS", "DEFAUT", "OK"},
+    {"PORT-OPTIONEN", "TOUCH-STEUERUNG", "GROESSE", "DECKKRAFT", "RENNEN", "SCHLIESSEN", "AN", "AUS", "KLEIN", "MITTEL", "GROSS", "UMSCHALTEN", "HALTEN", "TASTEN VERSCHIEBEN", "STANDARD", "FERTIG"},
+    {"OPCIONES DEL PORT", "CONTROLES TACTILES", "TAMANO", "OPACIDAD", "CORRER", "CERRAR", "SI", "NO", "PEQUENO", "MEDIANO", "GRANDE", "ALTERNAR", "MANTENER", "ARRASTRA LOS BOTONES", "RESTABLECER", "LISTO"},
+    {"OPZIONI DEL PORT", "CONTROLLI TOUCH", "DIMENSIONE", "OPACITA", "CORSA", "CHIUDI", "SI", "NO", "PICCOLO", "MEDIO", "GRANDE", "ALTERNA", "TIENI", "TRASCINA I PULSANTI", "RIPRISTINA", "FATTO"},
+    {"OPCOES DO PORT", "CONTROLES NA TELA", "TAMANHO", "OPACIDADE", "CORRER", "FECHAR", "SIM", "NAO", "PEQUENO", "MEDIO", "GRANDE", "ALTERNAR", "SEGURAR", "ARRASTE OS BOTOES", "PADRAO", "PRONTO"},
 };
 static const char *word(int w) {
     int l = set.lang >= 0 && set.lang < (int)(sizeof words / sizeof words[0]) ? set.lang : 0;
@@ -141,22 +182,23 @@ static void row_tap(int i, int back) {
     save();
 }
 static int in_rect(Rect r, float x, float y) { return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1; }
+static const Rect edit_reset = {0.32f, 0.16f, 0.49f, 0.27f}, edit_done = {0.51f, 0.16f, 0.68f, 0.27f};
 
 /* ---- input ---- */
 static float scale(void) { return set.size == 0 ? 0.8f : set.size == 2 ? 1.25f : 1.0f; }
 static int hit_button(float x, float y) {
     for (int i = 0; i < NB; i++) {
-        if (!set.on && !always_shown(&buttons[i])) continue;
+        if ((!set.on || pad_hidden) && !always_shown(&buttons[i]) && !editing) continue;
         if (menu_open && buttons[i].bit != B_MENU) continue;
         float r = buttons[i].r * (always_shown(&buttons[i]) ? 1.15f : scale() * 1.25f);   /* a forgiving target */
-        float dx = (x - buttons[i].x) * aspect, dy = y - buttons[i].y;
+        float dx = (x - bx[i]) * aspect, dy = y - by[i];
         if (dx * dx + dy * dy <= r * r) return i;
     }
     return -1;
 }
 static void recompute(void) {
-    uint16_t b = run_on && !menu_open ? B_RUN : 0;
-    for (int k = 0; k < 10 && !menu_open; k++) {
+    uint16_t b = run_on && !menu_open && !editing ? B_RUN : 0;
+    for (int k = 0; k < 10 && !menu_open && !editing; k++) {
         Finger *f = &fingers[k];
         if (!f->id) continue;
         if (f->role == 1) {                                   /* stick: direction from where the thumb landed */
@@ -183,6 +225,27 @@ void touch_event(int type, long id, float x, float y, float screen_aspect) {
     aspect = screen_aspect > 0.1f ? screen_aspect : aspect;
     int k;
     for (k = 0; k < 10 && fingers[k].id != id + 1; k++) {}
+    if (editing) {                                            /* moving the buttons */
+        if (type == 0) {
+            if (in_rect(edit_reset, x, y)) { default_places(); save(); }
+            else if (in_rect(edit_done, x, y)) { editing = 0; save(); }
+            else {
+                int bi = hit_button(x, y);
+                float sdx = (x - bx[NB]) * aspect, sdy = y - by[NB], sr = STICK_R * scale();
+                if (bi < 0 && set.stick && sdx * sdx + sdy * sdy <= sr * sr) bi = NB;
+                for (k = 0; k < 10 && fingers[k].id; k++) {}
+                if (bi >= 0 && k < 10) fingers[k] = (Finger){id + 1, x, y, bx[bi], by[bi], bi + 2};
+            }
+        } else if (k < 10) {
+            int i = fingers[k].role - 2;
+            bx[i] = fminf(0.98f, fmaxf(0.02f, fingers[k].x0 + x - fingers[k].x));   /* x, y: where the finger landed */
+            by[i] = fminf(0.97f, fmaxf(0.03f, fingers[k].y0 + y - fingers[k].y));
+            if (type == 2) fingers[k].id = 0;
+        }
+        dirty = 1;
+        pthread_mutex_unlock(&lk);
+        return;
+    }
     if (type == 0) {
         int bi = hit_button(x, y);
         if (menu_open && bi < 0) {                            /* the menu takes every other tap */
@@ -201,10 +264,18 @@ void touch_event(int type, long id, float x, float y, float screen_aspect) {
         *f = (Finger){id + 1, x, y, x, y, 0};
         if (bi >= 0) {
             f->role = bi + 2;
-            if (buttons[bi].bit == B_MENU) { menu_open = !menu_open; set.lang = port_setting("lang", 0); }
-            else if (buttons[bi].bit == B_RUN && !set.runhold) run_on = !run_on;
+            if (buttons[bi].bit == B_MENU) {
+                if (menu_open) menu_open = 0;
+                else if (!port_open_menu()) { menu_open = 1; set.lang = port_setting("lang", 0); }   /* the PC: its own panel */
+            } else {
+                if (buttons[bi].bit == B_RUN && !set.runhold) run_on = !run_on;
+                if (set.vibration && buttons[bi].bit != B_START) port_haptic();
+            }
             dirty = 1;
-        } else if (set.on && x < 0.5f) {
+        } else if (set.on && !pad_hidden && set.stick) {             /* the fixed stick: where it was put */
+            float dx = (x - bx[NB]) * aspect, dy = y - by[NB], r = STICK_R * scale() * 1.4f;
+            if (dx * dx + dy * dy <= r * r) { f->role = 1; f->x0 = bx[NB]; f->y0 = by[NB]; }
+        } else if (set.on && !pad_hidden && x < 0.5f) {
             f->role = 1;
         }
     } else if (k < 10) {
@@ -264,6 +335,7 @@ static int glyph(char ch) {
 }
 static uint8_t *pix;
 static int pw, ph;
+static char fps_text[16] = "";
 static void blend(int x, int y, uint32_t rgb, float a) {
     if (x < 0 || y < 0 || x >= pw || y >= ph || a <= 0) return;
     uint8_t *p = pix + 4 * ((size_t)y * pw + x);
@@ -347,19 +419,49 @@ const uint8_t *touch_picture(int w, int h, int *changed) {
     if (!active) return NULL;
     pthread_mutex_lock(&lk);
     if (w != pw || h != ph) { free(pix); pix = calloc((size_t)w * h, 4); pw = w; ph = h; dirty = 1; }
+    static uint32_t frames, t_last;
+    uint32_t now = SDL_GetTicks();
+    frames++;
+    if (now - t_last >= 500) {                                  /* twice a second: the fps text, a pad plugged or not */
+        if (set.showfps) { snprintf(fps_text, sizeof fps_text, "%d FPS", (int)(frames * 1000.0f / (float)(now - t_last) + 0.5f)); dirty = 1; }
+        int ph_now = set.padhides && SDL_HasGamepad();
+        if (ph_now != pad_hidden) { pad_hidden = ph_now; dirty = 1; }
+        frames = 0; t_last = now;
+    }
     if (!dirty) { pthread_mutex_unlock(&lk); return pix; }
     memset(pix, 0, (size_t)w * h * 4);
     float alpha = set.opacity == 0 ? 0.5f : set.opacity == 2 ? 1.0f : 0.75f, s = scale();
     if (menu_open) draw_menu(w, h);
+    if (editing) {                                                        /* moving the buttons */
+        rect(0, 0, (float)w, (float)h, 0x000000u, 0.35f);
+        text(word(T_DRAG), w * 0.5f, h * 0.08f, fmaxf(2.0f, (float)h / 170.0f), 0xF8F8F8u, 1.0f);
+        const Rect *rs[2] = {&edit_reset, &edit_done};
+        for (int i = 0; i < 2; i++) {
+            const Rect *r = rs[i];
+            rect(r->x0 * w - h / 160.0f, r->y0 * h - h / 160.0f, r->x1 * w + h / 160.0f, r->y1 * h + h / 160.0f, 0x3A0000u, 1.0f);
+            rect(r->x0 * w, r->y0 * h, r->x1 * w, r->y1 * h, 0x780000u, 1.0f);
+            text(word(i ? T_DONE : T_RESET), (r->x0 + r->x1) / 2 * w, (r->y0 + r->y1) / 2 * h, fmaxf(2.0f, (float)h / 200.0f), i ? 0xF8F8F8u : 0xF89018u, 1.0f);
+        }
+        if (set.stick) sprite(ART_STICK_BASE, bx[NB] * w, by[NB] * h, STICK_R * s * h, 1.0f, 0);
+    }
     for (int i = 0; i < NB; i++) {
         Button *b = &buttons[i];
-        if (!set.on && !always_shown(b)) continue;
+        if ((!set.on || pad_hidden) && !always_shown(b) && !editing) continue;
         if (menu_open && b->bit != B_MENU) continue;
-        float cx = b->x * (float)w, cy = b->y * (float)h, r = b->r * (always_shown(b) ? 1.0f : s) * (float)h;
+        float cx = bx[i] * (float)w, cy = by[i] * (float)h, r = b->r * (always_shown(b) ? 1.0f : s) * (float)h;
         int down = (held & b->bit) || (b->bit == B_RUN && run_on) || (b->bit == B_MENU && menu_open);
         sprite(b->art, cx, cy, down ? r * 0.94f : r, always_shown(b) ? fmaxf(alpha, 0.75f) : alpha, down);
     }
-    for (int k = 0; k < 10 && set.on && !menu_open; k++)        /* the stick under the thumb */
+    if (set.on && set.stick && !pad_hidden && !menu_open && !editing) {      /* the fixed stick, at rest */
+        int held_now = 0;
+        for (int k = 0; k < 10; k++) if (fingers[k].id && fingers[k].role == 1) held_now = 1;
+        if (!held_now) {
+            sprite(ART_STICK_BASE, bx[NB] * w, by[NB] * h, STICK_R * s * h, alpha, 0);
+            sprite(ART_STICK_KNOB, bx[NB] * w, by[NB] * h, STICK_R * s * h * 0.42f, alpha, 0);
+        }
+    }
+    if (set.showfps) text(fps_text, w * 0.035f, h * 0.955f, fmaxf(2.0f, (float)h / 280.0f), 0xF8F8F8u, 0.9f);
+    for (int k = 0; k < 10 && set.on && !menu_open && !editing; k++)        /* the stick under the thumb */
         if (fingers[k].id && fingers[k].role == 1) {
             float r = 0.13f * s * (float)h;
             sprite(ART_STICK_BASE, fingers[k].x0 * (float)w, fingers[k].y0 * (float)h, r, alpha, 0);

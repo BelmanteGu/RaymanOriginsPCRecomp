@@ -31,6 +31,7 @@ else FFC="-DUSF_NO_FFMPEG"; FFL=""; fi
 CFLAGS="-O2 -g -fPIC -Wall -Wno-unused-parameter -ffp-contract=off -fwrapv -fno-strict-aliasing $FFC
         -Iruntime/include -Iruntime/src -Iprivate/include -I$SDL3_SRC/include -I$NDK/sources/third_party/shaderc/libshaderc/include"
 [ private/include/touch_art.rgba -nt tools/touch_art.py ] || .venv/bin/python -I tools/touch_art.py   # the touch controls' drawings
+[ private/include/pad_icons.rgba -nt runtime/assets/pad_icons.png ] || .venv/bin/python -I tools/pad_icons_art.py   # the pad button icons
 for f in runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c; do
   $CC $CFLAGS -c "$f" -o "$OBJ/$(basename "$f" .c).o" &
 done

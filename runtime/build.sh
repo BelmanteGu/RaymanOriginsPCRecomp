@@ -9,6 +9,7 @@ CFLAGS="-O2 -g -Wall -Wno-unused-parameter -ffp-contract=off -fwrapv -fno-strict
 # Vulkan headers: private/include/vulkan -> the NDK's copy (same headers for the PC and Android builds)
 [ -e private/include/vulkan ] || { mkdir -p private/include; ln -sfn "$HOME/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/vulkan" private/include/vulkan; ln -sfn "$HOME/Android/Sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/vk_video" private/include/vk_video; }
 [ private/include/touch_art.rgba -nt tools/touch_art.py ] || .venv/bin/python -I tools/touch_art.py   # the touch controls' drawings
+[ private/include/pad_icons.rgba -nt runtime/assets/pad_icons.png ] || .venv/bin/python -I tools/pad_icons_art.py   # the pad button icons
 for f in runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c; do
   clang $CFLAGS -c "$f" -o "private/build/obj/$(basename "$f" .c).o" &
 done

@@ -114,6 +114,12 @@ int dxl_lock_readback(Wrap *w, uint32_t g_lr, uint32_t g_rect, uint32_t flags, c
 uint32_t dxl_unlock(Wrap *w, int slot, uint32_t key, uint64_t a1, uint64_t a2) {
     Lock *l = dxl_lock_pop(w, key);
     if (l) {
+        {                                                    /* the pad button atlas gets its pictures (pad_icons.c) */
+            void pad_icons_level(const void *tex, uint32_t level, uint8_t *px, uint32_t size);
+            if (w->type == DXB_TEXTURE && !(l->key & 0x8000FF00u)) pad_icons_level(w, l->key & 0xFFu, HOST(l->guest), l->size);
+            else if (w->type == DXB_SURFACE && w->parent && !(l->key & 0x80000000u))   /* a level through GetSurfaceLevel */
+                pad_icons_level(dxb_of(w->parent), w->plevel, HOST(l->guest), l->size);
+        }
         if (!(l->key & 0x80000000u)) { memcpy(l->host, HOST(l->guest), l->size); copied_tex_out += l->size; }
         if (w->type == DXB_TEXTURE && !(l->key & 0xFFFFu) && !(l->key & 0x80000000u)) {   /* level 0: content hash */
             uint32_t base = w->tsh ? w->tsh[0].guest : l->guest, sz = w->tsh ? w->tsh[0].size : l->size;

@@ -307,3 +307,28 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   while it is open.
 - Launcher: the adb development intent (`--es game <folder> --ez play true`) was skipped by the new menu; fixed. Tested
   on a Galaxy A56 (Exynos 1580, Xclipse 540): menu and first level at 60 fps, no crash.
+
+## 2026-11-22 — Controller buttons in the game's hints; the port's menu over the game
+
+![The new button atlas (top); the file select and world map hints with them (bottom)](media/m13-pad-icons.jpg)
+
+- **"Enter [1-A Button]" → a button picture.** The menus' hints take the button's name from the pad manager's
+  method 18 (0x4B71A0: confirm / back / delete... as player 1's actions 9, 4, 2, 10) and method 19 (0x4B7380);
+  with a pad or the touch layer they now answer an icon tag (`pad_icons.c`, like methods 16 and 17).
+- **The pictures.** The PC build's atlas for those tags (`consoles_buttons/x360/x360_pad_buttons.tga`, 512x256, 6 x 3
+  cells named in `uitextconfig.isg`) holds *keyboard keys* ("DELETE", "F1", arrows, Rayman for Space), and the game
+  makes it A8B8G8R8 from A8R8G8B8 pixels (red and blue swapped: Rayman's hair showed blue). The runtime now writes
+  Xbox-style buttons into its cells as the game fills each level (through GetSurfaceLevel + LockRect: hooked at the
+  bridge's unlock, `dxvk_locks.c`); the atlas is known by the hash of its first 4 KB. The mosquito, the steps and the
+  empty cells stay the game's.
+- **The art** (`runtime/assets/pad_icons.png`, made by `tools/pad_icons_art.py --draw`): one generated empty
+  button (glossy ball in a light blue ring, dark blue rim) tinted per button (A green, B red, X blue, Y yellow, the
+  rest graphite) and a generated sheet of symbols in the touch controls' lettering, cut from their white
+  (`private/padicons/gen/`, kept out of git; the PNG made from them is ours). The build turns the PNG into its 10
+  RGBA levels (`private/include/pad_icons.rgba`, embedded by `pad_icons_art.c`).
+- **The port's menu over the game** (Android): the gear opens the launcher's own Options screen (`GameMenu` in an
+  in-game mode) over the dimmed game, which is held still meanwhile (`port_android.c` → `game_pace`). Its last row
+  becomes **Button layout: Edit** (the buttons can then be dragged on the game's screen; RESET / DONE; kept as
+  `b<i>x`/`b<i>y` in `port_settings.txt`), and a plank at the bottom right goes **back to the launcher** (the game's
+  process ends). The launcher's options now act in the game too: fixed or floating stick, pad hides the touch
+  controls, show FPS, vibration (haptics through `GameActivity.haptic`).

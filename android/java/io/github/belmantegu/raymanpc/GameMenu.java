@@ -31,11 +31,18 @@ import java.util.Map;
  * Touch, a pad (d-pad, A / Start, B / Back) or a keyboard. "Projeto Belmante" on the game's red plank, bottom left.
  */
 final class GameMenu extends View {
-    interface Host { boolean hasGame(); void pickFolder(); void play(); void quit(); File dataDir(); }
+    interface Host {
+        boolean hasGame(); void pickFolder(); void play(); void quit(); File dataDir();
+        /* over the game (GameActivity): close this screen, move the on-screen buttons, back to the launcher */
+        default void closeMenu() {}
+        default void editLayout() {}
+        default void toLauncher() {}
+    }
 
     private static final int ORANGE = 0xFFF89018, WHITE = 0xFFF8F8F8, SHADOW = 0xFF200000, FIELD = 0xFFF8ECE0, FOCUS = 0xFFFFD040;
     private final MenuArt art;
     private final Host host;
+    private final boolean inGame;                         /* the Options screen over the game: no title, no menu */
     private final long t0 = SystemClock.uptimeMillis();
     private MediaPlayer music;
     private int screen;                                   /* 0 title, 1 menu, 2 settings */
@@ -56,12 +63,15 @@ final class GameMenu extends View {
     private final int[] rows = new int[9];
     private int[] savedRows; private int savedSize, savedRes, savedMusic, savedSfx;
 
-    GameMenu(Context c, MenuArt art, Host host) {
+    GameMenu(Context c, MenuArt art, Host host) { this(c, art, host, false); }
+    GameMenu(Context c, MenuArt art, Host host, boolean inGame) {
         super(c);
         this.art = art;
         this.host = host;
+        this.inGame = inGame;
+        if (inGame) screen = 2;
         setFocusable(true);
-        setBackgroundColor(Color.BLACK);
+        setBackgroundColor(inGame ? 0x99000000 : Color.BLACK);
         DisplayMetrics m = c.getResources().getDisplayMetrics();
         int sw = Math.max(m.widthPixels, m.heightPixels), sh = Math.min(m.widthPixels, m.heightPixels);
         for (int h : new int[] {sh, 900, 720, 540}) {
@@ -71,6 +81,7 @@ final class GameMenu extends View {
         focus.add("tabs");
         for (int i = 0; i < ROWS.length; i++) focus.add("row" + i);
         for (String s : new String[] {"res", "music", "sfx", "accept", "cancel"}) focus.add(s);
+        if (inGame) focus.add("launcher");
         loadSettings();
     }
 
@@ -96,6 +107,8 @@ final class GameMenu extends View {
     }
     void pause() { if (music != null && music.isPlaying()) music.pause(); }
     void release() { if (music != null) { music.release(); music = null; } }
+    /** over the game: open again with the saved values */
+    void reopen() { loadSettings(); screen = 2; f = 0; invalidate(); }
     void gameChosen(boolean ok) { status = ""; screen = ok ? 1 : 0; invalidate(); }
 
     /* ---- settings file (port_settings.txt; lines the launcher does not own are kept) ---- */
@@ -215,9 +228,13 @@ final class GameMenu extends View {
         }
     }
 
-    private String rowValue(int i) { return i == 1 ? LANGS[rows[1]] : ROWS[i][1 + Math.min(rows[i], ROWS[i].length - 2)]; }
+    private String rowLabel(int i) { return inGame && i == 8 ? "Button layout" : ROWS[i][0]; }
+    private String rowValue(int i) {
+        if (inGame && i == 8) return "Edit";
+        return i == 1 ? LANGS[rows[1]] : ROWS[i][1 + Math.min(rows[i], ROWS[i].length - 2)];
+    }
     private void drawOpts(Canvas c) {
-        art.image(c, art.bgMenu, 0, 0, MenuArt.W, MenuArt.H);
+        if (!inGame) art.image(c, art.bgMenu, 0, 0, MenuArt.W, MenuArt.H);   /* over the game: the game, dimmed */
         String on = focus.get(f);
         for (String[] p : new String[][] {{"settingscontrolsbg1", "ctrlhead"}, {"settingscontrolsbg2", "ctrllabels"}, {"settingscontrolsbg3", "ctrlvalues"},
             {"settingsdisplaybg", "display"}, {"settingssoundbg", "sound"}, {"settingsbackbut", "accept"}, {"settingsbackbut", "cancel"}})
@@ -234,7 +251,7 @@ final class GameMenu extends View {
         for (int i = 0; i < ROWS.length; i++) {
             float y = 362 + i * 50.75f;
             boolean fo = on.equals("row" + i);
-            art.text(c, t(ROWS[i][0]), 0.4f, fo ? WHITE : ORANGE, 551, y, SHADOW);
+            art.text(c, t(rowLabel(i)), 0.4f, fo ? WHITE : ORANGE, 551, y, SHADOW);
             art.image(c, fo ? "settingscontrolbutsel" : "settingscontrolbut", art.box(fo ? "fieldsel" : "field", i));
             art.text(c, t(rowValue(i)), 0.33f, fo ? WHITE : FIELD, 881, y, SHADOW);
             final int k = i;
@@ -267,6 +284,13 @@ final class GameMenu extends View {
         art.text(c, t("Cancel"), 0.52f, on.equals("cancel") ? WHITE : ORANGE, 1703, 758, SHADOW);
         hit(1158, 720, 1490, 796, this::accept);
         hit(1544, 722, 1862, 794, this::cancel);
+        if (inGame) {                                     /* back to the launcher: a plank like the brand's, on the right */
+            org.json.JSONArray b = art.box("brand"), r = new org.json.JSONArray();   /* the brand's plank, moved right */
+            try { for (int k = 0; k < 4; k++) r.put(k == 0 ? b.getDouble(0) + 1740 : b.getDouble(k)); } catch (Exception ignored) {}
+            art.image(c, "settingsbackbut", r);
+            art.text(c, t("Back to launcher"), 0.44f, on.equals("launcher") ? WHITE : ORANGE, 2040, 1003, SHADOW);
+            hit(1780, 960, 2300, 1044, host::toLauncher);
+        }
     }
     private void change(int d) {
         String on = focus.get(f);
@@ -274,19 +298,21 @@ final class GameMenu extends View {
         else if (on.startsWith("row")) {
             int i = Integer.parseInt(on.substring(3));
             if (i == 0) { size = 2; java.util.Arrays.fill(rows, 0); rows[2] = 1; resIdx = Math.min(2, res.size() - 1); music10 = sfx10 = 10; }
-            else if (i == 8) host.pickFolder();
+            else if (i == 8) { if (inGame) host.editLayout(); else host.pickFolder(); }
             else { int n = i == 1 ? LANGS.length : ROWS[i].length - 1; rows[i] = (rows[i] + d + n) % n; }
         } else if (on.equals("res")) resIdx = (resIdx + d + res.size()) % res.size();
         else if (on.equals("music")) { music10 = Math.max(0, Math.min(10, music10 + d)); if (music != null) music.setVolume(music10 / 10f, music10 / 10f); }
         else if (on.equals("sfx")) sfx10 = Math.max(0, Math.min(10, sfx10 + d));
         else if (on.equals("accept")) accept();
         else if (on.equals("cancel")) cancel();
+        else if (on.equals("launcher")) host.toLauncher();
     }
-    private void accept() { saveSettings(); status = "Settings saved"; screen = 1; }
+    private void accept() { saveSettings(); status = "Settings saved"; if (inGame) host.closeMenu(); else screen = 1; }
     private void cancel() {
         System.arraycopy(savedRows, 0, rows, 0, rows.length); size = savedSize; resIdx = savedRes; music10 = savedMusic; sfx10 = savedSfx;
         if (music != null) music.setVolume(music10 / 10f, music10 / 10f);
-        status = ""; screen = 1;
+        status = "";
+        if (inGame) host.closeMenu(); else screen = 1;
     }
 
     /* ---- input ---- */

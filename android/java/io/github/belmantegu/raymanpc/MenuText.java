@@ -32,6 +32,9 @@ final class MenuText {
         m.put("Hold", new String[] {"Maintenir", "Halten", "Mantener", "Tieni", "Vasthouden", "Segurar", "Przytrzymaj", "Удерживать"});
         m.put("On", new String[] {"Oui", "An", "Sí", "Sì", "Aan", "Sim", "Wł.", "Вкл."});
         m.put("Off", new String[] {"Non", "Aus", "No", "No", "Uit", "Não", "Wył.", "Выкл."});
+        m.put("Button layout", new String[] {"Position des boutons", "Tastenposition", "Posición botones", "Posizione tasti", "Knopposities", "Posição dos botões", "Układ przycisków", "Раскладка кнопок"});
+        m.put("Edit", new String[] {"Modifier", "Bearbeiten", "Editar", "Modifica", "Bewerken", "Editar", "Edytuj", "Изменить"});
+        m.put("Back to launcher", new String[] {"Retour au lanceur", "Zurück zum Launcher", "Volver al launcher", "Torna al launcher", "Terug naar launcher", "Voltar ao launcher", "Wróć do launchera", "Назад в лаунчер"});
         m.put("Change", new String[] {"Changer", "Ändern", "Cambiar", "Cambia", "Wijzigen", "Mudar", "Zmień", "Изменить"});
         m.put("Display Options", new String[] {"Options d'affichage", "Anzeigeoptionen", "Opciones de pantalla", "Opzioni schermo", "Beeldopties", "Opções de tela", "Opcje obrazu", "Настройки экрана"});
         m.put("Resolution", new String[] {"Résolution", "Auflösung", "Resolución", "Risoluzione", "Resolutie", "Resolução", "Rozdzielczość", "Разрешение"});
