@@ -48,6 +48,7 @@ final class GameMenu extends View {
     private int screen;                                   /* 0 title, 1 menu, 2 settings */
     private int sel, f;
     private String status = "";
+    private String busy;                                  /* a long job (the light copy): shown, and input waits */
 
     private static final String[] HOME = {"Play", "Options", "Game files", "Quit Game"};
     private static final String[] SIZES = {"Off", "S", "M", "L"};
@@ -87,6 +88,7 @@ final class GameMenu extends View {
 
     /* ---- language: the port's own texts follow the language chosen here (fr de es it nl pt pl ru; else English) ---- */
     private static final int[] TCOL = {-1, 0, 1, 2, 3, 5, 6, 7, 4, -1, -1, -1};
+    String text(String s) { return t(s); }
     private String t(String s) {
         String[] v = MenuText.I18N.get(s);
         int l = TCOL[rows[1] < TCOL.length ? rows[1] : 0];
@@ -109,6 +111,8 @@ final class GameMenu extends View {
     void release() { if (music != null) { music.release(); music = null; } }
     /** over the game: open again with the saved values */
     void reopen() { loadSettings(); screen = 2; f = 0; invalidate(); }
+    /** a long job's text ("Making the light copy 45%"), or null when it is over */
+    void showBusy(String text) { busy = text; invalidate(); }
     void gameChosen(boolean ok) { status = ""; screen = ok ? 1 : 0; invalidate(); }
 
     /* ---- settings file (port_settings.txt; lines the launcher does not own are kept) ---- */
@@ -170,6 +174,12 @@ final class GameMenu extends View {
         art.image(c, art.canal, 78, 968, 68, 68);
         art.text(c, "Projeto Belmante", 0.44f, WHITE, 335, 1003, SHADOW);
         hit(40, 960, 560, 1044, () -> getContext().startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/@belmante"))));
+        if (busy != null) {                               /* the job's band over everything */
+            android.graphics.Paint p = new android.graphics.Paint();
+            p.setColor(0xC0000000);
+            c.drawRect(0, 860, MenuArt.W, 960, p);
+            art.text(c, busy, 0.5f, WHITE, 1170, 912, SHADOW);
+        }
         c.restore();
         postInvalidateOnAnimation();
     }
@@ -318,7 +328,7 @@ final class GameMenu extends View {
     /* ---- input ---- */
     @Override
     public boolean onTouchEvent(MotionEvent e) {
-        if (e.getActionMasked() != MotionEvent.ACTION_UP) return true;
+        if (e.getActionMasked() != MotionEvent.ACTION_UP || busy != null) return true;
         float x = (e.getX() - ox) / scale, y = (e.getY() - oy) / scale;
         for (int i = hitBox.size() - 1; i >= 0; i--) if (hitBox.get(i).contains(x, y)) { hitDo.get(i).run(); break; }
         invalidate();
@@ -337,7 +347,7 @@ final class GameMenu extends View {
             case KeyEvent.KEYCODE_BUTTON_B: case KeyEvent.KEYCODE_BACK: case KeyEvent.KEYCODE_ESCAPE: k = "back"; break;
             default: return false;
         }
-        if (e.getAction() != KeyEvent.ACTION_DOWN) return true;
+        if (e.getAction() != KeyEvent.ACTION_DOWN || busy != null) return true;
         if (screen == 0) { if (k.equals("ok")) titleGo(); else if (k.equals("back")) host.quit(); }
         else if (screen == 1) {
             if (k.equals("down") && sel < HOME.length - 1) sel++;

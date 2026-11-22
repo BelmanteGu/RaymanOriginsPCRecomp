@@ -8,6 +8,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Environment;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
@@ -250,8 +252,8 @@ public class LauncherActivity extends Activity {
         if (req == REQ_FOLDER && game != null) {
             String path = treeToPath(data.getData());
             boolean ok = isGame(path);
-            if (ok) prefs().edit().putString("game", path).apply();
-            game.gameChosen(ok);
+            if (ok) { prefs().edit().putString("game", path).apply(); makeLight(() -> game.gameChosen(true)); }
+            else game.gameChosen(false);
         } else if (req == REQ_FOLDER) {
             String path = treeToPath(data.getData());
             if (isGame(path)) { prefs().edit().putString("game", path).apply(); status.setText(""); selected = 0; showMenu(); }
@@ -282,7 +284,40 @@ public class LauncherActivity extends Activity {
         }).start();
     }
 
+    /** The light copy (Packer), once: made from the chosen folder into the app's folder, which then becomes the game;
+     *  a copy that was itself in the app's folder (imported) is removed. `then` runs afterwards in any case. */
+    private boolean making;
+    void makeLight(Runnable then) {
+        String src = gameDir();
+        File dest = new File(getExternalFilesDir(null), "game_lite");
+        boolean inApp = src.startsWith(getExternalFilesDir(null).getPath());
+        if (making || game == null || Packer.isLight(src) || (!inApp && !storageAllowed())) { if (!making) then.run(); return; }
+        making = true;
+        Handler ui = new Handler(Looper.getMainLooper());
+        String label = game.text("Making the light copy of the game (once)");
+        Runnable tick = new Runnable() { public void run() { if (!making) return; game.showBusy(label + "  " + Packer.progress() / 10 + "%"); ui.postDelayed(this, 250); } };
+        ui.post(tick);
+        new Thread(() -> {
+            String err = Packer.compress(new File(src), dest);
+            ui.post(() -> {
+                making = false;
+                game.showBusy(null);
+                if (err == null) {
+                    prefs().edit().putString("game", dest.getPath()).apply();
+                    if (inApp && !src.equals(dest.getPath())) Packer.deleteAll(new File(src));
+                } else {
+                    android.widget.Toast.makeText(this, err, android.widget.Toast.LENGTH_LONG).show();
+                }
+                then.run();
+            });
+        }).start();
+    }
+
     void play() {
+        if (game != null && !Packer.isLight(gameDir())) { makeLight(this::playNow); return; }
+        playNow();
+    }
+    private void playNow() {
         boolean inApp = gameDir().startsWith(getExternalFilesDir(null).getPath());   /* imported from a .zip */
         if (!inApp && !storageAllowed()) return;
         Intent i = new Intent(this, GameActivity.class);

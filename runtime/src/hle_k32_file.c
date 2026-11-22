@@ -24,8 +24,9 @@
 
 #include "game.h"
 #include "hle.h"
+#include "lite.h"
 
-typedef struct { int fd; char path[1024]; } File;
+typedef struct { int fd; char path[1024]; Lite *lite; uint64_t pos; } File;   /* lite: the compressed archive (lite_read.c) */
 
 static void user_root(char *out, size_t n) {
     snprintf(out, n, "%s/drive_c", g_data_dir);
@@ -157,6 +158,12 @@ static uint32_t create_file(CPU *c, uint32_t a, int wide) {
     case 5: fl |= O_TRUNC; break;
     }
     if (fl & O_CREAT) { char dir[1024]; snprintf(dir, sizeof dir, "%s", path); char *s = strrchr(dir, '/'); if (s) { *s = 0; mkdirs(dir); } }
+    char lp[1100];
+    Lite *lite = NULL;
+    if (!(access & 0x40000000u) && lite_path_for(path, lp, sizeof lp) && (lite = lite_shared(lp))) {   /* bundle_PC.lite */
+        snprintf(path, sizeof path, "%s", lp);
+        fl = O_RDONLY;
+    }
     int fd = open(path, fl, 0644);
     usf_log("CreateFile(%s) -> fd %d\n", path, fd);
     if (fd < 0) { set_errno_error(c); return 0xFFFFFFFFu; }
@@ -164,6 +171,7 @@ static uint32_t create_file(CPU *c, uint32_t a, int wide) {
     if (fstat(fd, &st) == 0 && S_ISDIR(st.st_mode)) { close(fd); set_last_error(c, 5); return 0xFFFFFFFFu; }
     File *f = calloc(1, sizeof *f);
     f->fd = fd;
+    f->lite = lite;
     snprintf(f->path, sizeof f->path, "%s", path);
     set_last_error(c, (disp == 4 || disp == 2) ? 0u : 0u);
     return handle_new(H_FILE, f);
@@ -177,8 +185,15 @@ uint32_t k32_ReadFile(CPU *c, uint32_t a) {
     File *f = fget(ARG(0));
     if (!f) { set_last_error(c, 6); return 0; }
     uint32_t ov = ARG(4);
-    ssize_t r = ov ? pread(f->fd, HOST(ARG(1)), ARG(2), (off_t)(R32(ov + 8) | (uint64_t)R32(ov + 12) << 32))
-                   : read(f->fd, HOST(ARG(1)), ARG(2));
+    ssize_t r;
+    if (f->lite) {                                             /* the compressed archive: the original's bytes */
+        uint64_t at = ov ? (R32(ov + 8) | (uint64_t)R32(ov + 12) << 32) : f->pos;
+        r = (ssize_t)lite_pread(f->lite, HOST(ARG(1)), ARG(2), at);
+        if (r > 0 && !ov) f->pos += (uint64_t)r;
+    } else {
+        r = ov ? pread(f->fd, HOST(ARG(1)), ARG(2), (off_t)(R32(ov + 8) | (uint64_t)R32(ov + 12) << 32))
+               : read(f->fd, HOST(ARG(1)), ARG(2));
+    }
     if (r < 0) { set_errno_error(c); return 0; }
     if (ARG(3)) W32(ARG(3), (uint32_t)r);
     if (ov) {
@@ -220,6 +235,14 @@ uint32_t k32_SetFilePointer(CPU *c, uint32_t a) {
     if (!f) { set_last_error(c, 6); return 0xFFFFFFFFu; }
     int64_t off = (int32_t)ARG(1);
     if (ARG(2)) off = (int64_t)((uint64_t)R32(ARG(2)) << 32 | ARG(1));
+    if (f->lite) {
+        int64_t r = (ARG(3) == 0 ? 0 : ARG(3) == 1 ? (int64_t)f->pos : (int64_t)lite_size(f->lite)) + off;
+        if (r < 0) { set_last_error(c, 131); return 0xFFFFFFFFu; }
+        f->pos = (uint64_t)r;
+        if (ARG(2)) W32(ARG(2), (uint32_t)((uint64_t)r >> 32));
+        set_last_error(c, 0);
+        return (uint32_t)r;
+    }
     off_t r = lseek(f->fd, (off_t)off, ARG(3) == 0 ? SEEK_SET : ARG(3) == 1 ? SEEK_CUR : SEEK_END);
     if (r < 0) { set_errno_error(c); return 0xFFFFFFFFu; }
     if (ARG(2)) W32(ARG(2), (uint32_t)((uint64_t)r >> 32));
@@ -231,6 +254,7 @@ uint32_t k32_GetFileSize(CPU *c, uint32_t a) {
     File *f = fget(ARG(0));
     struct stat st;
     if (!f || fstat(f->fd, &st)) { set_last_error(c, 6); return 0xFFFFFFFFu; }
+    if (f->lite) st.st_size = (off_t)lite_size(f->lite);
     if (ARG(1)) W32(ARG(1), (uint32_t)((uint64_t)st.st_size >> 32));
     return (uint32_t)st.st_size;
 }
@@ -238,6 +262,7 @@ uint32_t k32_GetFileSizeEx(CPU *c, uint32_t a) {
     File *f = fget(ARG(0));
     struct stat st;
     if (!f || fstat(f->fd, &st)) { set_last_error(c, 6); return 0; }
+    if (f->lite) st.st_size = (off_t)lite_size(f->lite);
     W64(ARG(1), (uint64_t)st.st_size);
     return 1;
 }
@@ -269,6 +294,7 @@ uint32_t k32_GetFileInformationByHandle(CPU *c, uint32_t a) {
     File *f = fget(ARG(0));
     struct stat st;
     if (!f || fstat(f->fd, &st)) return 0;
+    if (f->lite) st.st_size = (off_t)lite_size(f->lite);
     uint32_t p = ARG(1);
     memset(HOST(p), 0, 52);
     W32(p, 0x80);                                              /* FILE_ATTRIBUTE_NORMAL */
@@ -280,7 +306,8 @@ uint32_t k32_GetFileInformationByHandle(CPU *c, uint32_t a) {
 
 static uint32_t attrs(const char *path) {
     struct stat st;
-    if (stat(path, &st)) return 0xFFFFFFFFu;
+    char lp[1100];
+    if (stat(path, &st)) return lite_path_for(path, lp, sizeof lp) ? 0x80u : 0xFFFFFFFFu;
     return S_ISDIR(st.st_mode) ? 0x10u : 0x80u;
 }
 uint32_t k32_GetFileAttributesW(CPU *c, uint32_t a) {
@@ -341,18 +368,23 @@ typedef struct { DIR *d; char dir[1024]; char pat[256]; int wide; } Find;
 static int find_next(Find *f, uint32_t out) {
     struct dirent *e;
     while ((e = readdir(f->d))) {
-        if (fnmatch(f->pat, e->d_name, FNM_CASEFOLD)) continue;
-        char full[1400];
+        const char *name = e->d_name;
+        char full[1400], ipk[1400], lp[1100];
         snprintf(full, sizeof full, "%s/%s", f->dir, e->d_name);
+        snprintf(ipk, sizeof ipk, "%s/bundle_PC.ipk", f->dir);
+        Lite *lite = NULL;                                     /* the compressed archive shows as the archive */
+        if (!strcasecmp(name, "bundle_pc.lite") && lite_path_for(ipk, lp, sizeof lp) && (lite = lite_shared(lp))) name = "bundle_PC.ipk";
+        if (fnmatch(f->pat, name, FNM_CASEFOLD)) continue;
         struct stat st;
         if (stat(full, &st)) continue;
+        if (lite) st.st_size = (off_t)lite_size(lite);
         uint32_t size = f->wide ? 592u : 320u;
         memset(HOST(out), 0, size);
         W32(out, S_ISDIR(st.st_mode) ? 0x10u : 0x80u);
         W64(out + 4, ft_of(st.st_mtim)); W64(out + 12, ft_of(st.st_atim)); W64(out + 20, ft_of(st.st_mtim));
         W32(out + 28, (uint32_t)((uint64_t)st.st_size >> 32)); W32(out + 32, (uint32_t)st.st_size);
-        if (f->wide) utf8_to_w(e->d_name, out + 44, 260);
-        else snprintf((char *)HOST(out + 44), 260, "%s", e->d_name);
+        if (f->wide) utf8_to_w(name, out + 44, 260);
+        else snprintf((char *)HOST(out + 44), 260, "%s", name);
         return 1;
     }
     return 0;

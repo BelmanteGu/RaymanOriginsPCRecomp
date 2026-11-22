@@ -28,14 +28,14 @@ rm -rf $OBJ; mkdir -p $OBJ $OUT
 FF=private/android/ffmpeg/out                 # tools/android/build_ffmpeg.sh (movies); without it, movies end at once
 if [ -f $FF/lib/libavcodec.a ]; then FFC="-I$FF/include"; FFL="$FF/lib/libavformat.a $FF/lib/libavcodec.a $FF/lib/libswscale.a $FF/lib/libswresample.a $FF/lib/libavutil.a"
 else FFC="-DUSF_NO_FFMPEG"; FFL=""; fi
-CFLAGS="-O2 -g -fPIC -Wall -Wno-unused-parameter -ffp-contract=off -fwrapv -fno-strict-aliasing $FFC
+OPUS=private/android/opus/out                 # tools/android/build_opus.sh (the compressed archive's sounds)
+[ -f $OPUS/lib/libopus.a ] || sh tools/android/build_opus.sh
+CFLAGS="-O2 -g -fPIC -Wall -Wno-unused-parameter -ffp-contract=off -fwrapv -fno-strict-aliasing $FFC -I$OPUS/include/opus
         -Iruntime/include -Iruntime/src -Iprivate/include -I$SDL3_SRC/include -I$NDK/sources/third_party/shaderc/libshaderc/include"
 [ private/include/touch_art.rgba -nt tools/touch_art.py ] || .venv/bin/python -I tools/touch_art.py   # the touch controls' drawings
 [ private/include/pad_icons.rgba -nt runtime/assets/pad_icons.png ] || .venv/bin/python -I tools/pad_icons_art.py   # the pad button icons
-for f in runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c; do
-  $CC $CFLAGS -c "$f" -o "$OBJ/$(basename "$f" .c).o" &
-done
-wait
+export CC CFLAGS OBJ                            # four at a time (a light load on the machine)
+ls runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c | xargs -P 4 -I{} sh -c '$CC $CFLAGS -c "{}" -o "$OBJ/$(basename "{}" .c).o"' 
 n_src=$(ls runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c | wc -l)
 [ "$(ls $OBJ/*.o | wc -l)" -eq "$n_src" ] || { echo "error: a runtime file did not compile"; exit 1; }
 LFLAGS="-O2 -fPIC -ffp-contract=off -fwrapv -fno-strict-aliasing -Iruntime/include"
@@ -50,8 +50,11 @@ usf_callsites_blob:
 usf_callsites_blob_end:
 EOF
 $CC -c $OBJ/callsites_blob.S -o $OBJ/callsites_blob.o
-$CXX -shared -o $OUT/libmain.so $OBJ/*.o private/obj/a64/lifted_[0-9]*.o $SHADERC $FFL \
+$CXX -shared -o $OUT/libmain.so $OBJ/*.o private/obj/a64/lifted_[0-9]*.o $SHADERC $FFL $OPUS/lib/libopus.a -lz \
   -L$SDL3_ANDROID -lSDL3 -lvulkan -landroid -llog -lm -static-libstdc++ -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,--exclude-libs,ALL
 cp $SDL3_ANDROID/libSDL3.so $OUT/
-[ -n "${USF_KEEP_SYMBOLS:-}" ] || $TC/llvm-strip --strip-debug $OUT/libmain.so
+# libpack.so: the launcher compresses the player's archive with it (runtime/android/pack_jni.c, runtime/src/lite_make.c)
+$CC -O2 -fPIC -shared -Iruntime/src -I$OPUS/include/opus -o $OUT/libpack.so runtime/android/pack_jni.c runtime/src/lite_make.c \
+  $OPUS/lib/libopus.a -lz -lm -Wl,-z,max-page-size=16384
+[ -n "${USF_KEEP_SYMBOLS:-}" ] || $TC/llvm-strip --strip-debug $OUT/libmain.so $OUT/libpack.so
 ls -la $OUT

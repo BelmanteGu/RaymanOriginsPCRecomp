@@ -35,6 +35,7 @@ final class MenuText {
         m.put("Button layout", new String[] {"Position des boutons", "Tastenposition", "Posición botones", "Posizione tasti", "Knopposities", "Posição dos botões", "Układ przycisków", "Раскладка кнопок"});
         m.put("Edit", new String[] {"Modifier", "Bearbeiten", "Editar", "Modifica", "Bewerken", "Editar", "Edytuj", "Изменить"});
         m.put("Back to launcher", new String[] {"Retour au lanceur", "Zurück zum Launcher", "Volver al launcher", "Torna al launcher", "Terug naar launcher", "Voltar ao launcher", "Wróć do launchera", "Назад в лаунчер"});
+        m.put("Making the light copy of the game (once)", new String[] {"Création de la copie légère du jeu (une fois)", "Leichte Kopie des Spiels wird erstellt (einmal)", "Creando la copia ligera del juego (una vez)", "Creazione della copia leggera del gioco (una volta)", "Lichte kopie van het spel maken (eenmalig)", "Criando a cópia leve do jogo (uma vez)", "Tworzenie lekkiej kopii gry (raz)", "Создание облегчённой копии игры (один раз)"});
         m.put("Change", new String[] {"Changer", "Ändern", "Cambiar", "Cambia", "Wijzigen", "Mudar", "Zmień", "Изменить"});
         m.put("Display Options", new String[] {"Options d'affichage", "Anzeigeoptionen", "Opciones de pantalla", "Opzioni schermo", "Beeldopties", "Opções de tela", "Opcje obrazu", "Настройки экрана"});
         m.put("Resolution", new String[] {"Résolution", "Auflösung", "Resolución", "Risoluzione", "Resolutie", "Resolução", "Rozdzielczość", "Разрешение"});

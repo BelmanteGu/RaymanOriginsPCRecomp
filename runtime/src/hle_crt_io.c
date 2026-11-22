@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "hle_crt.h"
+#include "lite.h"
 
 #define D(name) uint32_t x_##name(CPU *c, uint32_t a)
 #define NFILES 256
@@ -133,7 +134,13 @@ static uint32_t do_stat(CPU *c, uint32_t path, int wide, uint32_t out, int size6
     char hp[1200];
     struct stat st;
     stat_path(path, wide, hp, sizeof hp);
-    if (stat(hp, &st)) { crt_set_errno(c, errno); return 0xFFFFFFFFu; }
+    char lp[1100];
+    Lite *lite = NULL;                                         /* the compressed archive stands for the archive */
+    if (stat(hp, &st) && !(lite_path_for(hp, lp, sizeof lp) && !stat(lp, &st) && (lite = lite_shared(lp)))) {
+        crt_set_errno(c, errno);
+        return 0xFFFFFFFFu;
+    }
+    if (lite) st.st_size = (off_t)lite_size(lite);
     memset(HOST(out), 0, size64 ? 56 : 48);
     W32(out + 0, 2);                                           /* st_dev: drive C */
     W16(out + 6, win_mode(&st));
@@ -154,7 +161,8 @@ D(_wstat64i32) { return do_stat(c, ARG(0), 1, ARG(1), 0); }
 D(_waccess_s) {                                                /* (path, mode) -> errno value */
     char hp[1200];
     stat_path(ARG(0), 1, hp, sizeof hp);
-    if (access(hp, F_OK)) { crt_set_errno(c, errno); return 2; }
+    char lp[1100];
+    if (access(hp, F_OK) && !lite_path_for(hp, lp, sizeof lp)) { crt_set_errno(c, errno); return 2; }
     return 0;
 }
 D(_wremove) {

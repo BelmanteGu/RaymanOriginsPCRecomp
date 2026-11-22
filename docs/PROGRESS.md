@@ -332,3 +332,35 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   `b<i>x`/`b<i>y` in `port_settings.txt`), and a plank at the bottom right goes **back to the launcher** (the game's
   process ends). The launcher's options now act in the game too: fixed or floating stick, pad hides the touch
   controls, show FPS, vibration (haptics through `GameActivity.haptic`).
+
+## 2026-11-22 — The light copy of the game: 2.4 GB → about 0.6 GB
+
+What the 2.4 GB are: `bundle_PC.ipk` 2.1 GB, of which **1.67 GB is uncompressed PCM audio** (16-bit, 48 kHz:
+music, voices, effects), 306 MB files the game already keeps zlib'd (textures, animations, scenes), 115 MB other
+uncompressed files; and 268 MB of Bink movies, 162 MB of them the attract-mode reel (`rolling_demo.bik`).
+
+- **`bundle_PC.lite`** (`runtime/src/lite.h`, `lite_make.c`): the archive cut into its files and the gaps between
+  them; every 16-bit 48 kHz PCM WAVE becomes **Opus** (CELT, 96 kb/s stereo / 64 kb/s mono, 20 ms frames, VBR,
+  complexity 10; header and trailing chunks kept as they are, the exact number of samples), other uncompressed files
+  zlib level 9 when that saves a tenth, the rest as it is. 2,093 MB → **473 MB** (sounds 1,672 → 111 MB) in 46 s on
+  the PC (4 threads).
+- **The game does not know** (`lite_read.c`): where the archive is missing and `bundle_PC.lite` is there, the file
+  layer (`CreateFile`, `ReadFile`, `SetFilePointer`, sizes, attributes, find-first/next) and the C runtime's
+  `_waccess_s` / `_stat` (the game checks the archive exists that way) answer with the original archive's bytes at
+  the original offsets. Sounds are decoded progressively, as far as the game has read plus half a second (music is
+  streamed), into a 96 MB cache.
+- **Checked** (`tools/lite/lite_check.c`): all 13,447 regions give back the original bytes except the sounds' samples;
+  the sounds have the same headers and lengths and are aligned to the sample (a first try with SILK for mono came out
+  2 samples early: CELT only now). Reading the 48 biggest sounds in 8 KB pieces gives the same bytes as reading them
+  whole. The game ran from the light copy to a level with its music and effects; making the sounds back cost about
+  0.5 s in all.
+- **Movies**: the attract reel is left out; a missing movie makes BinkOpen answer "no movie" and the game goes on
+  (idle 100 s on the title: never asked for). The intro and ending stay as they are (Bink is already compressed).
+- **Android**: `libpack.so` (`runtime/android/pack_jni.c` + `lite_make.c` + libopus built by
+  `tools/android/build_opus.sh`) and `Packer.java`: once, when the Steam folder is chosen or at the first Play, the
+  launcher makes `game_lite/` in the app's folder (program, `bundle_PC.lite`, intro / ending / sample movies), shows
+  the progress over the menu, and plays from it; a copy that was already inside the app's folder is then removed.
+- Not done: recompressing the textures the game keeps zlib'd with something stronger (xz would save about 80 MB
+  more, but the game wants zlib: they would have to be re-deflated at every load, slower levels on a phone).
+
+Total on the phone: 473 MB archive + 106 MB movies + 8 MB program ≈ **0.59 GB** instead of 2.37 GB.
