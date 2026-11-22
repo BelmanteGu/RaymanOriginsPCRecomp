@@ -165,7 +165,10 @@ final class MenuArt {
     private int[] cols = new int[0];
 
     /** one draw of an animation frame; dy: an extra vertical offset in clip units (the menu's other slots) */
-    void patches(Canvas c, Draw d, float dy) {
+    void patches(Canvas c, Draw d, float dy) { patches(c, d, dy, 1); }
+    /** alpha: 0..1 over the draw's own colours (the menu's carousel cross-fades the big and small bars) */
+    void patches(Canvas c, Draw d, float dy, float alpha) {
+        if (alpha <= 0.01f) return;
         Bitmap atlas = tex.get(d.atlas.equals("bubble") ? "bubblemenu_a" : d.atlas);
         if (atlas == null) return;
         Paint p = shaders.get(d.atlas);
@@ -201,6 +204,7 @@ final class MenuArt {
                     float l1 = c0 + (c1 - c0) * s, l2 = c2 + (c3 - c2) * s;
                     cc[ch] = Math.min(1, (l1 + (l2 - l1) * t) * d.vc[ch]);
                 }
+                cc[3] *= alpha;
                 gc[k] = ((int) (cc[3] * 255) << 24) | ((int) (cc[0] * 255) << 16) | ((int) (cc[1] * 255) << 8) | (int) (cc[2] * 255);
                 k++;
             }

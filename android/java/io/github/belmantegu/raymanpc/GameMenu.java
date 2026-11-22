@@ -172,28 +172,36 @@ final class GameMenu extends View {
     }
     private void titleGo() { if (!host.hasGame()) host.pickFolder(); else { screen = 1; status = ""; } }
 
-    private float slotY(int s) {
-        List<MenuArt.Draw> fr = art.bars.frames.get(0);
-        float m7 = s == 0 ? fr.get(0).m[7] : s > 0 ? fr.get(s == 1 ? 3 : 4).m[7] : -fr.get(s == -1 ? 3 : 4).m[7];
-        return (1 - m7) / 2 * MenuArt.H + 4;
-    }
+    /* the carousel: pos follows sel with an ease-out (about 0.2 s); an item at slot s (fractional while moving) sits
+     * 0.3 clip units per slot lower (the game's +1 / +2 bars: -0.3, -0.6), its big bar (with the hand) fading into
+     * the small one as it leaves the centre */
+    private float pos;
+    private long lastMs;
+    private static float slotClip(float s) { return -0.3f * s; }
     private void drawHome(Canvas c, long ms) {
         art.image(c, art.bgMenu, 0, 0, MenuArt.W, MenuArt.H);
+        float dt = lastMs == 0 ? 0 : Math.min(0.1f, (ms - lastMs) / 1000f);
+        lastMs = ms;
+        pos += (sel - pos) * Math.min(1, dt * 14);
+        if (Math.abs(sel - pos) < 0.002f) pos = sel;
         List<MenuArt.Draw> fr = art.frame(art.bars, ms);
         for (int i = 0; i < HOME.length; i++) {
-            int s = i - sel;
-            if (s < -2 || s > 2) continue;
-            if (s == 0) for (int k = 0; k < 3; k++) art.patches(c, fr.get(k), 0);
-            else { MenuArt.Draw d = fr.get(Math.abs(s) == 1 ? 3 : 4); art.patches(c, d, s < 0 ? -2 * d.m[7] : 0); }
+            float s = i - pos, a = Math.abs(s);
+            if (a > 2.6f) continue;
+            float big = Math.max(0, 1 - a), small = Math.min(1, a), clip = slotClip(s), fade = a > 2 ? Math.max(0, 1 - (a - 2) / 0.6f) : 1;
+            for (int k = 0; k < 3; k++) art.patches(c, fr.get(k), clip - fr.get(k).m[7], big);
+            MenuArt.Draw d = fr.get(a < 1.5f ? 3 : 4);
+            art.patches(c, d, clip - d.m[7], small * fade);
         }
         for (int i = 0; i < HOME.length; i++) {
-            int s = i - sel;
-            if (s < -2 || s > 2) continue;
-            float y = slotY(s);
-            art.text(c, t(HOME[i]), s == 0 ? 0.95f : 0.62f, s == 0 ? WHITE : ORANGE, 1170, y, SHADOW);
+            float s = i - pos, a = Math.abs(s);
+            if (a > 2.6f) continue;
+            float y = (1 - slotClip(s)) / 2 * MenuArt.H + 4, k = Math.min(1, a), fade = a > 2 ? Math.max(0, 1 - (a - 2) / 0.6f) : 1;
+            int alpha = (int) (255 * fade) << 24;
+            art.text(c, t(HOME[i]), 0.95f + (0.62f - 0.95f) * k, (k < 0.5f ? WHITE : ORANGE) & 0xFFFFFF | alpha, 1170, y, SHADOW & 0xFFFFFF | alpha);
             final int item = i;
-            float h = s == 0 ? 80 : 48;
-            hit(700, y - h, 1700, y + h, () -> { if (item == sel) choose(); else sel = item; });
+            float h = a < 0.5f ? 80 : 48;
+            if (fade > 0.5f) hit(700, y - h, 1700, y + h, () -> { if (item == sel) choose(); else sel = item; });
         }
         art.text(c, "Port 0.1 - 1.0.32504", 0.41f, WHITE, 2010, 974, SHADOW);
         if (!status.isEmpty()) art.text(c, t(status), 0.42f, ORANGE, 1170, 1020, SHADOW);
