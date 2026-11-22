@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds the Android APK private/android/rayman-origins-pc.apk without Gradle: aapt2 (resources), javac + d8 (our Java and
 # SDL3's), the native libraries from tools/android/build_native.sh, zipalign and apksigner (a local debug key).
-# The launcher art and the app icon come from Imgs/ (Fundo.png, Logo.png, Icone.png: not in git) when present.
+# The app icon: runtime/assets/app_icon.png. The launcher's game art: private/launcher/apk/launcher/ (made from the player's copy by
+# tools/launcher_mock.py) when present (GameMenu.java); otherwise the plain launcher.
 # usage: sh tools/android/build_apk.sh            (run tools/android/build_native.sh first)
 set -e
 SDK=${SDK:-$HOME/Android/Sdk}
@@ -18,8 +19,9 @@ rm -rf $W; mkdir -p $W/res $W/gen $W/classes $W/compiled
 import os
 from PIL import Image
 out = "private/android/apk/res"
-if os.path.exists("Imgs/Icone.png"):
-    ico = Image.open("Imgs/Icone.png").convert("RGBA")
+icon = "runtime/assets/app_icon.png" if os.path.exists("runtime/assets/app_icon.png") else "Imgs/Icone.png"
+if os.path.exists(icon):
+    ico = Image.open(icon).convert("RGBA")
     for d, s in (("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192)):
         os.makedirs(f"{out}/mipmap-{d}", exist_ok=True)
         ico.resize((s, s), Image.LANCZOS).save(f"{out}/mipmap-{d}/ic_launcher.png")
@@ -51,6 +53,11 @@ with zipfile.ZipFile("private/android/apk/unsigned.apk", "a", zipfile.ZIP_DEFLAT
     z.write("private/android/apk/classes.dex", "classes.dex")
     for so in sorted(glob.glob("private/android/lib/arm64-v8a/*.so")):
         z.write(so, "lib/arm64-v8a/" + os.path.basename(so))
+    # the launcher's art in the game's look (tools/launcher_mock.py, from the player's own copy; personal builds only)
+    for root, _, files in os.walk("private/launcher/apk"):
+        for f in files:
+            p = os.path.join(root, f)
+            z.write(p, "assets/" + os.path.relpath(p, "private/launcher/apk"))
 EOF
 $BT/zipalign -f -P 16 4 $W/unsigned.apk $W/aligned.apk
 

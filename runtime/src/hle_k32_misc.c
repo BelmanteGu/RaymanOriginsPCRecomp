@@ -158,8 +158,16 @@ uint32_t k32_GetCPInfo(CPU *c, uint32_t a) {
     W8(p + 4, '?');
     return 1;
 }
-uint32_t k32_GetUserDefaultLCID(CPU *c, uint32_t a) { (void)c; (void)a; return 0x0409; }
-uint32_t k32_GetUserDefaultLangID(CPU *c, uint32_t a) { (void)c; (void)a; return 0x0409; }
+/* The language: the one chosen in the launcher (port_settings.txt lang=, the launcher's list), English otherwise */
+int port_setting(const char *key, int def);
+uint32_t port_langid(void);
+uint32_t port_langid(void) {
+    static const uint16_t ids[12] = {0x0409, 0x040C, 0x0407, 0x0C0A, 0x0410, 0x0416, 0x0415, 0x0419, 0x0413, 0x0405, 0x040E, 0x0411};
+    int i = port_setting("lang", 0);
+    return ids[i >= 0 && i < 12 ? i : 0];
+}
+uint32_t k32_GetUserDefaultLCID(CPU *c, uint32_t a) { (void)c; (void)a; return port_langid(); }
+uint32_t k32_GetUserDefaultLangID(CPU *c, uint32_t a) { (void)c; (void)a; return port_langid(); }
 uint32_t k32_IsValidLocale(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
 uint32_t k32_EnumSystemLocalesA(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
 
@@ -167,8 +175,16 @@ static const char *locale_field(uint32_t type) {
     switch (type & 0xFFFFu) {
     case 0x0B: return "1252";            /* LOCALE_IDEFAULTANSICODEPAGE */
     case 0x0C: return "437";             /* LOCALE_IDEFAULTCODEPAGE */
-    case 0x01: return "0409";            /* LOCALE_ILANGUAGE */
-    case 0x59: return "en";              /* LOCALE_SISO639LANGNAME */
+    case 0x01: {                         /* LOCALE_ILANGUAGE: the launcher's language */
+        static char id[8];
+        snprintf(id, sizeof id, "%04x", port_langid());
+        return id;
+    }
+    case 0x59: {                         /* LOCALE_SISO639LANGNAME */
+        static const char *iso[12] = {"en", "fr", "de", "es", "it", "pt", "pl", "ru", "nl", "cs", "hu", "ja"};
+        int i = port_setting("lang", 0);
+        return iso[i >= 0 && i < 12 ? i : 0];
+    }
     case 0x5A: return "US";              /* LOCALE_SISO3166CTRYNAME */
     case 0x0E: return ".";               /* decimal separator */
     case 0x0F: return ",";               /* thousand separator */

@@ -44,18 +44,34 @@ public class LauncherActivity extends Activity {
     private final List<String> descriptions = new ArrayList<>();
     private int selected;
     private boolean busy;
+    private GameMenu game;                   /* the launcher in the game's look, when the build has its art (GameMenu) */
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         st = new MenuStyle(this);
-        setContentView(build());
+        GameMenu g = null;
+        if (MenuArt.available(this)) {
+            try {
+                g = new GameMenu(this, MenuArt.load(this), new GameMenu.Host() {
+                    public boolean hasGame() { return isGame(gameDir()); }
+                    public void pickFolder() { LauncherActivity.this.pickFolder(); }
+                    public void play() { LauncherActivity.this.play(); }
+                    public void quit() { finishAndRemoveTask(); }
+                    public File dataDir() { return LauncherActivity.this.dataDir(); }
+                });
+            } catch (Exception e) { g = null; }
+        }
+        game = g;
+        if (game != null) setContentView(game); else setContentView(build());
         hideBars();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        hideBars();
+        if (game != null) { game.resume(); return; }
         if (!busy) showMenu();
         /* development over adb: am start -n .../.LauncherActivity --es game /sdcard/RaymanOrigins [--ez play true] */
         Intent in = getIntent();
@@ -70,11 +86,16 @@ public class LauncherActivity extends Activity {
     }
 
     @Override
+    protected void onPause() { super.onPause(); if (game != null) game.pause(); }
+    @Override
+    protected void onDestroy() { if (game != null) game.release(); super.onDestroy(); }
+
+    @Override
     protected void onNewIntent(Intent i) { super.onNewIntent(i); setIntent(i); }
 
     private SharedPreferences prefs() { return getSharedPreferences("launcher", MODE_PRIVATE); }
     String gameDir() { return prefs().getString("game", ""); }
-    private File dataDir() { File d = new File(getExternalFilesDir(null), "data"); d.mkdirs(); return d; }
+    File dataDir() { File d = new File(getExternalFilesDir(null), "data"); d.mkdirs(); return d; }
 
     /** A folder holding Rayman Origins.exe (any case). */
     static boolean isGame(String dir) {
@@ -176,6 +197,7 @@ public class LauncherActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (game != null) return game.key(e) || super.dispatchKeyEvent(e);
         if (e.getAction() != KeyEvent.ACTION_DOWN || busy) return super.dispatchKeyEvent(e);
         switch (e.getKeyCode()) {
             case KeyEvent.KEYCODE_DPAD_UP: select(selected - 1); return true;
@@ -189,7 +211,7 @@ public class LauncherActivity extends Activity {
     /* ---- files ---- */
     private boolean storageAllowed() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()) return true;
-        status.setText("Allow \"access to all files\" so the game folder can be read in place, then come back.");
+        if (status != null) status.setText("Allow \"access to all files\" so the game folder can be read in place, then come back.");
         try {
             startActivity(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getPackageName())));
         } catch (Exception ex) {
@@ -198,7 +220,7 @@ public class LauncherActivity extends Activity {
         return false;
     }
 
-    private void pickFolder() {
+    void pickFolder() {
         if (!storageAllowed()) return;
         startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_FOLDER);
     }
@@ -224,7 +246,12 @@ public class LauncherActivity extends Activity {
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (res != RESULT_OK || data == null || data.getData() == null) return;
-        if (req == REQ_FOLDER) {
+        if (req == REQ_FOLDER && game != null) {
+            String path = treeToPath(data.getData());
+            boolean ok = isGame(path);
+            if (ok) prefs().edit().putString("game", path).apply();
+            game.gameChosen(ok);
+        } else if (req == REQ_FOLDER) {
             String path = treeToPath(data.getData());
             if (isGame(path)) { prefs().edit().putString("game", path).apply(); status.setText(""); selected = 0; showMenu(); }
             else status.setText("Rayman Origins.exe is not in " + path + ". Select the game's own folder.");
@@ -254,7 +281,7 @@ public class LauncherActivity extends Activity {
         }).start();
     }
 
-    private void play() {
+    void play() {
         boolean inApp = gameDir().startsWith(getExternalFilesDir(null).getPath());   /* imported from a .zip */
         if (!inApp && !storageAllowed()) return;
         Intent i = new Intent(this, GameActivity.class);

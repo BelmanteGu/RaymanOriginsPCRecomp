@@ -236,3 +236,25 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   reboot); the captures were finished on the Intel GPU (`VK_ICD_FILENAMES=.../intel_icd.json`).
 
 ![Title, menu and settings of the mock-up](media/m10-launcher-animated.jpg)
+
+## 2026-11-22 — Android launcher in Java in the game's look; language; crash reports
+
+- **Launcher** (`GameMenu.java`, `MenuArt.java`, `MenuText.java`; no WebView): a View drawing a 2340x1080 stage scaled
+  to the screen. Title screen with the game's animated logo asking for the Steam folder; the menu with the animated
+  bars and hand (Play, Options, Game files, Quit Game); the settings on the game's Options screen; the menu theme in a
+  loop (MediaPlayer); "Projeto Belmante" on the game's red plank. The animations are the game's Bezier patches drawn
+  with `Canvas.drawVertices` over the atlases; text in the game's font. Touch, pad (d-pad, A/Start, B/Back) or keys.
+  Its art comes from the player's copy (`tools/launcher_mock.py` writes `private/launcher/apk/launcher/`;
+  `build_apk.sh` packs it: personal builds); without it the plain launcher stays. App icon: `runtime/assets/app_icon.png`.
+- **Settings** go to `port_settings.txt` (the launcher keeps the runtime's own keys and vice versa): touch / size /
+  opacity (touch.c), `lines` (the resolution, hle_advapi.c), `lang`, volumes, stick, run, vibration...; 120 fps hidden.
+- **Language**: the game reads `HKLM\SOFTWARE\Ubisoft\RaymanOrigins\Settings\Language` (a DWORD, its own numbers:
+  `localisation.loc` has 0 en, 1 fr, 2 ja, 3 de, 4 es, 5 it, 8 pt, 10 pl, 11 ru, 12 nl, 13 cs, 14 hu); the runtime
+  answers it from `lang=`. Checked: lang French -> the title reads "Appuie sur ENTRÉE.". The launcher's own texts follow
+  (8 translations; Czech, Hungarian and Japanese show English there).
+- **Crash on the phone** (a level closed by itself): Android's exit info shows the game process killed by SIGSEGV
+  (rss 1.5 GB), with no tombstone, because the runtime's fault handler reset the signal to the default. Now a fault
+  is written to logcat and `<data>/crash.txt` (native pc, lifted function, stack) and then handed to Android's own
+  handler (tombstone). The cause itself needs that report from the next crash.
+
+![The launcher on the Galaxy S23](media/m11-android-launcher.jpg)

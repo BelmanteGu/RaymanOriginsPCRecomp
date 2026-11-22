@@ -46,24 +46,36 @@ static float aspect = 16.0f / 9.0f;                     /* of the screen: circle
 
 /* ---- settings ---- */
 static void path(char *out, size_t n) { snprintf(out, n, "%s/port_settings.txt", g_data_dir); }
+/* port_settings.txt is shared with the launcher (it writes lang=, lines=, music=...): lines this file does not own are
+ * kept as they are */
 static void save(void) {
-    char p[1100];
-    path(p, sizeof p);
-    FILE *f = fopen(p, "w");
-    if (f) { fprintf(f, "touch=%d\nsize=%d\nopacity=%d\nfps120=%d\n", set.on, set.size, set.opacity, set.fps120); fclose(f); }
-}
-static void load(void) {
-    char p[1100], line[128];
+    char p[1100], keep[2048] = "", line[160];
     path(p, sizeof p);
     FILE *f = fopen(p, "r");
-    while (f && fgets(line, sizeof line, f)) {
-        int v;
-        if (sscanf(line, "touch=%d", &v) == 1) set.on = v;
-        else if (sscanf(line, "size=%d", &v) == 1) set.size = v % 3;
-        else if (sscanf(line, "opacity=%d", &v) == 1) set.opacity = v % 3;
-        else if (sscanf(line, "fps120=%d", &v) == 1) set.fps120 = v;
-    }
+    while (f && fgets(line, sizeof line, f))
+        if (strncmp(line, "touch=", 6) && strncmp(line, "size=", 5) && strncmp(line, "opacity=", 8) && strncmp(line, "fps120=", 7) &&
+            strlen(keep) + strlen(line) < sizeof keep) strcat(keep, line);
     if (f) fclose(f);
+    f = fopen(p, "w");
+    if (f) { fprintf(f, "touch=%d\nsize=%d\nopacity=%d\nfps120=%d\n%s", set.on, set.size, set.opacity, set.fps120, keep); fclose(f); }
+}
+/* one value of port_settings.txt, or def (the launcher's keys: lang, lines, music, sfx, stick, run, vibration...) */
+int port_setting(const char *key, int def);
+int port_setting(const char *key, int def) {
+    char p[1100], line[160];
+    size_t n = strlen(key);
+    path(p, sizeof p);
+    FILE *f = fopen(p, "r");
+    while (f && fgets(line, sizeof line, f))
+        if (!strncmp(line, key, n) && line[n] == '=') { def = atoi(line + n + 1); break; }
+    if (f) fclose(f);
+    return def;
+}
+static void load(void) {
+    set.on = port_setting("touch", set.on);
+    set.size = port_setting("size", set.size) % 3;
+    set.opacity = port_setting("opacity", set.opacity) % 3;
+    set.fps120 = port_setting("fps120", set.fps120);
 }
 void touch_init(void);
 void touch_init(void) {

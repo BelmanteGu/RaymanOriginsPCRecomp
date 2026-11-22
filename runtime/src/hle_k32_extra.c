@@ -34,7 +34,8 @@ uint32_t k32_GlobalMemoryStatus(CPU *c, uint32_t a) {
     W32(p + 24, 0x7FFE0000u); W32(p + 28, 0x60000000u);          /* virtual */
     return 0;
 }
-uint32_t k32_GetUserDefaultUILanguage(CPU *c, uint32_t a) { (void)c; (void)a; return 0x0409; }
+uint32_t port_langid(void);                                     /* hle_k32_misc.c: the launcher's language */
+uint32_t k32_GetUserDefaultUILanguage(CPU *c, uint32_t a) { (void)c; (void)a; return port_langid(); }
 uint32_t k32_SleepEx(CPU *c, uint32_t a) { (void)c; usleep(ARG(0) ? ARG(0) * 1000u : 0); if (!ARG(0)) sched_yield(); return 0; }
 uint32_t k32_FlushConsoleInputBuffer(CPU *c, uint32_t a) { (void)c; (void)a; return 1; }
 uint32_t k32_TerminateThread(CPU *c, uint32_t a) {

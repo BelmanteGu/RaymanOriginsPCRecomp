@@ -6,6 +6,7 @@
  * about the process itself: command line, modules, GetProcAddress, TLS, last error, exit.
  * What it does not do: files, sync objects, memory APIs (hle_k32_*.c) or exceptions (not handled yet).
  */
+#define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -362,21 +363,66 @@ static void android_log(void) {
  * the destructor of an online-layer (Quazal) object (0x8F8660, a std::map walked after it was freed). Until that is
  * understood, a fault after the player closed the window ends the process normally, with a note. Before that, a
  * fault is reported as the crash it is. */
+#include <dlfcn.h>
+#include <fcntl.h>
 #include <signal.h>
+#include <ucontext.h>
+#include <unwind.h>
 extern volatile int g_quitting;
-static void on_fault(int sig) {
+static struct sigaction old_segv, old_bus;                 /* Android's crash handler (debuggerd: the tombstone) */
+static int crash_fd = -1;
+static void put(const char *s) { if (write(2, s, strlen(s)) < 0) {} if (crash_fd >= 0 && write(crash_fd, s, strlen(s)) < 0) {} }
+static void put_pc(const char *what, uintptr_t pc) {
+    char b[256];
+    Dl_info di;
+    if (dladdr((void *)pc, &di) && di.dli_sname) snprintf(b, sizeof b, "  %s %p %s+0x%lx\n", what, (void *)pc, di.dli_sname, (unsigned long)(pc - (uintptr_t)di.dli_saddr));
+    else snprintf(b, sizeof b, "  %s %p\n", what, (void *)pc);
+    put(b);
+}
+static _Unwind_Reason_Code frame_cb(struct _Unwind_Context *ctx, void *arg) {
+    int *n = arg;
+    uintptr_t pc = _Unwind_GetIP(ctx);
+    if (pc && (*n)++ < 24) put_pc("at", pc);
+    return *n < 24 ? _URC_NO_REASON : _URC_END_OF_STACK;
+}
+/* A fault: written to stderr (logcat on Android) and to <data>/crash.txt with the native pc, the lifted function it
+ * is in (f_<guest address>) and the stack; then Android's own handler runs (tombstone, "app crashed" record).
+ * Closing the game: its shutdown faults in the destructor of an online-layer (Quazal) object (0x8F8660, a std::map
+ * walked after it was freed); a fault after the player closed the window ends the process normally, with a note. */
+static void on_fault(int sig, siginfo_t *si, void *uc_) {
     if (g_quitting) {
         static const char m[] = "usf: fault during the game's shutdown (known, see process.c): exiting normally\n";
         if (write(2, m, sizeof m - 1) < 0) {}
         _exit(0);
     }
-    signal(sig, SIG_DFL);
-    raise(sig);
+    char p[1100], b[160];
+    snprintf(p, sizeof p, "%s/crash.txt", g_data_dir);
+    crash_fd = open(p, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    snprintf(b, sizeof b, "usf: CRASH signal %d at address %p\n", sig, si ? si->si_addr : NULL);
+    put(b);
+    ucontext_t *uc = uc_;
+#if defined(__aarch64__)
+    put_pc("pc", (uintptr_t)uc->uc_mcontext.pc);
+    put_pc("lr", (uintptr_t)uc->uc_mcontext.regs[30]);
+#elif defined(__x86_64__)
+    put_pc("pc", (uintptr_t)uc->uc_mcontext.gregs[REG_RIP]);
+#endif
+    int n = 0;
+    _Unwind_Backtrace(frame_cb, &n);
+    if (crash_fd >= 0) close(crash_fd);
+    sigaction(sig, sig == SIGSEGV ? &old_segv : &old_bus, NULL);   /* returning re-runs the fault into it */
+}
+static void catch_faults(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = on_fault;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigaction(SIGSEGV, &sa, &old_segv);
+    sigaction(SIGBUS, &sa, &old_bus);
 }
 
 int main(int argc, char **argv) {
-    signal(SIGSEGV, on_fault);
-    signal(SIGBUS, on_fault);
+    catch_faults();
 #ifdef __ANDROID__
     android_log();
 #endif

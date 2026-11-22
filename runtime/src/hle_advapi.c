@@ -101,13 +101,15 @@ uint32_t x_RegCloseKey(CPU *c, uint32_t a) { (void)c; (void)a; return 0; }
  * desktop) and windowed mode (RAYMAN_FULLSCREEN=1 for full screen). Returns 1 if `name` was one of them. */
 static RegVal *find_val(uint32_t hkey, uint32_t wname, int create);
 int screen_size(uint32_t *w, uint32_t *h);
+int port_setting(const char *key, int def);
 static int video_setting(uint32_t hkey, uint32_t wname, uint32_t type_out, uint32_t data, uint32_t size_io) {
     char vn[64];
     w2utf8(wname, vn, sizeof vn);
     int w = GAME_DEFAULT_W, h = GAME_DEFAULT_H;
 #ifdef __ANDROID__
-    uint32_t sw, sh;                                               /* 720 lines in the screen's shape */
-    if (screen_size(&sw, &sh) && sh) { h = sh < 720 ? (int)sh : 720; w = (int)((uint64_t)sw * (uint32_t)h / sh) & ~7; }
+    uint32_t sw, sh;                       /* the launcher's lines (port_settings lines=, 720 by default) in the screen's shape */
+    int lines = port_setting("lines", 720);
+    if (screen_size(&sw, &sh) && sh) { h = sh < (uint32_t)lines ? (int)sh : lines; w = (int)((uint64_t)sw * (uint32_t)h / sh) & ~7; }
 #endif
     const char *r = getenv("RAYMAN_RES");
     if (r) sscanf(r, "%dx%d", &w, &h);
@@ -136,9 +138,26 @@ static int video_setting(uint32_t hkey, uint32_t wname, uint32_t type_out, uint3
     }
     return 0;
 }
+/* HKLM\...\Settings\Language (the installer's value, a DWORD the game passes on as language=%d): the language chosen in
+ * the launcher (port_settings.txt lang=, the launcher's list) as the game's own numbers (localisation.loc: 0 English,
+ * 1 French, 3 German, 4 Spanish, 5 Italian, 8 Portuguese, 10 Polish, 11 Russian, 12 Dutch, 13 Czech, 14 Hungarian,
+ * 2 Japanese). Without the setting, the registry file (or nothing: English) answers. */
+int port_setting(const char *key, int def);
+static int language_setting(uint32_t wname, uint32_t type_out, uint32_t data, uint32_t size_io) {
+    static const uint8_t game_lang[12] = {0, 1, 3, 4, 5, 8, 10, 11, 12, 13, 14, 2};
+    char vn[32];
+    w2utf8(wname, vn, sizeof vn);
+    int i = port_setting("lang", -1);
+    if (strcasecmp(vn, "Language") || i < 0 || i >= 12) return 0;
+    if (type_out) W32(type_out, 4);                                   /* REG_DWORD */
+    if (data && (!size_io || R32(size_io) >= 4)) W32(data, game_lang[i]);
+    if (size_io) W32(size_io, 4);
+    return 1;
+}
 uint32_t x_RegQueryValueExW(CPU *c, uint32_t a) {                /* (key, name, 0, &type, data, &size) */
     (void)c;
     if (ARG(1) && video_setting(ARG(0), ARG(1), ARG(3), ARG(4), ARG(5))) return 0;
+    if (ARG(1) && language_setting(ARG(1), ARG(3), ARG(4), ARG(5))) return 0;
     pthread_mutex_lock(&reg_lock);
     RegVal *v = find_val(ARG(0), ARG(1), 0);
     uint32_t r = 2;                                                /* ERROR_FILE_NOT_FOUND */
@@ -150,6 +169,7 @@ uint32_t x_RegQueryValueExW(CPU *c, uint32_t a) {                /* (key, name, 
         if (ARG(5)) W32(ARG(5), v->size);
     }
     pthread_mutex_unlock(&reg_lock);
+    if (getenv("USF_REGLOG")) { char nm[64]; w2utf8(ARG(1), nm, sizeof nm); fprintf(stderr, "usf: RegQueryValueExW %s -> %u (room %u)\n", nm, r, ARG(5) ? R32(ARG(5)) : 0); }
     return r;
 }
 uint32_t x_RegSetValueExW(CPU *c, uint32_t a) {                  /* (key, name, 0, type, data, size) */

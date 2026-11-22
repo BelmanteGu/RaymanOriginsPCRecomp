@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import shutil
 
 import numpy as np
 from PIL import Image
@@ -74,6 +75,7 @@ def main():
         "display": place("settingsdisplaybg", (1144, 178, 1882, 404)),
         "sound": place("settingssoundbg", (1140, 428, 1878, 696)),
         "accept": place("settingsbackbut", (1158, 720, 1490, 796)),
+        "brand": place("settingsbackbut", (40, 960, 560, 1044)),
         "cancel": place("settingsbackbut", (1544, 722, 1862, 794)),
         "field": [place("settingscontrolbut", (742, 342 + i * 50.75, 1020, 382 + i * 50.75)) for i in range(9)],
         "fieldsel": [place("settingscontrolbutsel", (742, 342 + i * 50.75, 1020, 382 + i * 50.75)) for i in range(9)],
@@ -102,6 +104,20 @@ def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     open(OUT, "w").write(html)
     print(OUT, len(html) // 1024, "KB")
+    # the same pieces as files for the Android launcher (GameMenu.java): private/launcher/apk/launcher/, packed by
+    # tools/android/build_apk.sh into the APK's assets (a personal build: they come from the player's copy)
+    A = os.path.join(L, "apk", "launcher")
+    os.makedirs(os.path.join(A, "tex"), exist_ok=True)
+    bg.save(os.path.join(A, "bg_menu.jpg"), quality=90)
+    bg_title.save(os.path.join(A, "bg_title.jpg"), quality=90)
+    Image.open(os.path.join(PNG, "font02_0.png")).save(os.path.join(A, "font.png"))
+    json.dump(fnt, open(os.path.join(A, "font.json"), "w"), separators=(",", ":"))
+    json.dump(geo, open(os.path.join(A, "geo.json"), "w"), separators=(",", ":"))
+    for n in list(tex) + ["logo_a", "logo_b", "logo_c", "bubblemenu_a"]:
+        Image.open(os.path.join(PNG, n + ".png")).save(os.path.join(A, "tex", n + ".png"))
+    for n in ("logo.json.gz", "bars.json.gz", "menu_music.ogg"):
+        shutil.copy(os.path.join(L, n), os.path.join(A, n))
+    print(A, sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(A) for f in fs) // 1024, "KB")
 
 
 if __name__ == "__main__":

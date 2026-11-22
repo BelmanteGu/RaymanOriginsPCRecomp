@@ -1,0 +1,48 @@
+package io.github.belmantegu.raymanpc;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/** The launcher's own texts in French, German, Spanish, Italian, Dutch, Portuguese, Polish and Russian (English is the
+ * key; GameMenu picks the column of the language chosen in its settings). */
+final class MenuText {
+    static final Map<String, String[]> I18N = new HashMap<>();
+    static {
+        Map<String, String[]> m = I18N;
+        m.put("Select your Rayman Origins folder (Steam)", new String[] {"Choisissez votre dossier Rayman Origins (Steam)", "Wähle deinen Rayman-Origins-Ordner (Steam)", "Elige tu carpeta de Rayman Origins (Steam)", "Scegli la cartella di Rayman Origins (Steam)", "Kies je Rayman Origins-map (Steam)", "Escolha a sua pasta do Rayman Origins (Steam)", "Wybierz folder Rayman Origins (Steam)", "Выберите папку Rayman Origins (Steam)"});
+        m.put("Your own copy is read in place, nothing is downloaded", new String[] {"Votre copie est lue sur place, rien n'est téléchargé", "Deine eigene Kopie wird direkt gelesen, nichts wird geladen", "Se lee tu propia copia, no se descarga nada", "La tua copia viene letta sul posto, non si scarica nulla", "Je eigen kopie wordt gelezen, er wordt niets gedownload", "A sua cópia é lida no lugar, nada é baixado", "Twoja kopia jest czytana na miejscu, nic nie jest pobierane", "Ваша копия читается на месте, ничего не скачивается"});
+        m.put("Play", new String[] {"Jouer", "Spielen", "Jugar", "Gioca", "Spelen", "Jogar", "Graj", "Играть"});
+        m.put("Options", new String[] {"Options", "Optionen", "Opciones", "Opzioni", "Opties", "Opções", "Opcje", "Настройки"});
+        m.put("Game files", new String[] {"Fichiers du jeu", "Spieldateien", "Archivos del juego", "File di gioco", "Spelbestanden", "Arquivos do jogo", "Pliki gry", "Файлы игры"});
+        m.put("Quit Game", new String[] {"Quitter le jeu", "Spiel beenden", "Salir del juego", "Esci dal gioco", "Spel afsluiten", "Sair do jogo", "Wyjdź z gry", "Выйти из игры"});
+        m.put("Touch Controls", new String[] {"Commandes tactiles", "Touch-Steuerung", "Controles táctiles", "Comandi touch", "Aanraakbediening", "Controles de toque", "Sterowanie dotykowe", "Сенсорное управление"});
+        m.put("Size", new String[] {"Taille", "Größe", "Tamaño", "Dimensione", "Grootte", "Tamanho", "Rozmiar", "Размер"});
+        m.put("Defaults", new String[] {"Défaut", "Standard", "Predeterm.", "Predefiniti", "Standaard", "Padrão", "Domyślne", "По умолч."});
+        m.put("Language", new String[] {"Langue", "Sprache", "Idioma", "Lingua", "Taal", "Idioma", "Język", "Язык"});
+        m.put("Opacity", new String[] {"Opacité", "Deckkraft", "Opacidad", "Opacità", "Dekking", "Opacidade", "Krycie", "Прозрачн."});
+        m.put("Stick", new String[] {"Stick", "Stick", "Stick", "Levetta", "Stick", "Analógico", "Gałka", "Стик"});
+        m.put("Run", new String[] {"Courir", "Rennen", "Correr", "Corsa", "Rennen", "Correr", "Bieg", "Бег"});
+        m.put("Vibration", new String[] {"Vibration", "Vibration", "Vibración", "Vibrazione", "Trilling", "Vibração", "Wibracje", "Вибрация"});
+        m.put("Pad hides", new String[] {"Manette cache", "Pad verbirgt", "Mando oculta", "Pad nasconde", "Pad verbergt", "Controle oculta", "Pad ukrywa", "Пад скрывает"});
+        m.put("Show FPS", new String[] {"Afficher FPS", "FPS zeigen", "Mostrar FPS", "Mostra FPS", "FPS tonen", "Mostrar FPS", "Pokaż FPS", "Показ. FPS"});
+        m.put("RESET", new String[] {"RÉINIT.", "ZURÜCKS.", "RESTABLECER", "RIPRISTINA", "RESET", "REDEFINIR", "RESETUJ", "СБРОС"});
+        m.put("Floating", new String[] {"Flottant", "Schwebend", "Flotante", "Mobile", "Zwevend", "Flutuante", "Pływająca", "Плавающий"});
+        m.put("Fixed", new String[] {"Fixe", "Fest", "Fijo", "Fisso", "Vast", "Fixo", "Stała", "Фиксир."});
+        m.put("Toggle", new String[] {"Bascule", "Umschalten", "Alternar", "Alterna", "Wisselen", "Alternar", "Przełącz", "Переключ."});
+        m.put("Hold", new String[] {"Maintenir", "Halten", "Mantener", "Tieni", "Vasthouden", "Segurar", "Przytrzymaj", "Удерживать"});
+        m.put("On", new String[] {"Oui", "An", "Sí", "Sì", "Aan", "Sim", "Wł.", "Вкл."});
+        m.put("Off", new String[] {"Non", "Aus", "No", "No", "Uit", "Não", "Wył.", "Выкл."});
+        m.put("Change", new String[] {"Changer", "Ändern", "Cambiar", "Cambia", "Wijzigen", "Mudar", "Zmień", "Изменить"});
+        m.put("Display Options", new String[] {"Options d'affichage", "Anzeigeoptionen", "Opciones de pantalla", "Opzioni schermo", "Beeldopties", "Opções de tela", "Opcje obrazu", "Настройки экрана"});
+        m.put("Resolution", new String[] {"Résolution", "Auflösung", "Resolución", "Risoluzione", "Resolutie", "Resolução", "Rozdzielczość", "Разрешение"});
+        m.put("Sound Options", new String[] {"Options sonores", "Tonoptionen", "Opciones de sonido", "Opzioni audio", "Geluidsopties", "Opções de som", "Opcje dźwięku", "Настройки звука"});
+        m.put("Music Volume", new String[] {"Volume musique", "Musiklautstärke", "Volumen música", "Volume musica", "Muziekvolume", "Volume da música", "Głośność muzyki", "Громк. музыки"});
+        m.put("SFX Volume", new String[] {"Volume effets", "Effektlautstärke", "Volumen efectos", "Volume effetti", "Effectvolume", "Volume dos efeitos", "Głośność efektów", "Громк. эффектов"});
+        m.put("Accept", new String[] {"Accepter", "Annehmen", "Aceptar", "Accetta", "Accepteren", "Aceitar", "Akceptuj", "Принять"});
+        m.put("Cancel", new String[] {"Annuler", "Abbrechen", "Cancelar", "Annulla", "Annuleren", "Cancelar", "Anuluj", "Отмена"});
+        m.put("Settings saved", new String[] {"Réglages enregistrés", "Einstellungen gespeichert", "Ajustes guardados", "Impostazioni salvate", "Instellingen opgeslagen", "Configurações salvas", "Zapisano ustawienia", "Настройки сохранены"});
+        m.put("Starting the game...", new String[] {"Lancement du jeu...", "Spiel startet...", "Iniciando el juego...", "Avvio del gioco...", "Spel wordt gestart...", "Iniciando o jogo...", "Uruchamianie gry...", "Запуск игры..."});
+        m.put("Bye!", new String[] {"Au revoir !", "Tschüss!", "¡Adiós!", "Ciao!", "Doei!", "Tchau!", "Pa!", "Пока!"});
+    }
+    private MenuText() {}
+}
