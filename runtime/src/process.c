@@ -374,8 +374,9 @@ static int crash_fd = -1;
 static void put(const char *s) { if (write(2, s, strlen(s)) < 0) {} if (crash_fd >= 0 && write(crash_fd, s, strlen(s)) < 0) {} }
 static void put_pc(const char *what, uintptr_t pc) {
     char b[256];
-    Dl_info di;
+    Dl_info di = {0};
     if (dladdr((void *)pc, &di) && di.dli_sname) snprintf(b, sizeof b, "  %s %p %s+0x%lx\n", what, (void *)pc, di.dli_sname, (unsigned long)(pc - (uintptr_t)di.dli_saddr));
+    else if (di.dli_fbase) snprintf(b, sizeof b, "  %s %p %s+0x%lx\n", what, (void *)pc, di.dli_fname ? di.dli_fname : "?", (unsigned long)(pc - (uintptr_t)di.dli_fbase));
     else snprintf(b, sizeof b, "  %s %p\n", what, (void *)pc);
     put(b);
 }
@@ -469,6 +470,7 @@ int main(int argc, char **argv) {
     build_peb();
     CPU *c = cpu_alloc();
     cpu_on_new_stack(c, 0x400000u);
+    { void pad_icons_install(void); pad_icons_install(); }   /* button icons in texts (pad_icons.c) */
     fprintf(stderr, "usf: starting %s at %08x (game folder %s)\n", GAME_EXE, g_entry, g_game_dir);
     c->esp -= 4u;
     W32(c->esp, THUNK_BASE - 16u);

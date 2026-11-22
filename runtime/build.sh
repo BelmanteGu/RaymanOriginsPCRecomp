@@ -14,5 +14,5 @@ for f in runtime/src/*.c runtime/src/d3d9/*.c runtime/src/vk/*.c; do
 done
 wait
 clang -O2 -ffp-contract=off -fwrapv -fno-strict-aliasing -Iruntime/include -Iprivate/lifted -c private/lifted/lifted_table.c -o private/build/obj/lifted_table.o
-clang -o private/build/rayman private/build/obj/*.o private/obj/x64/lifted_[0-9]*.o -lm -lpthread -lvulkan -lshaderc_shared $(pkg-config --libs sdl3 libavformat libavcodec libswscale libswresample libavutil)
+clang -rdynamic -o private/build/rayman private/build/obj/*.o private/obj/x64/lifted_[0-9]*.o -lm -lpthread -lvulkan -lshaderc_shared $(pkg-config --libs sdl3 libavformat libavcodec libswscale libswresample libavutil)
 echo "built private/build/rayman"

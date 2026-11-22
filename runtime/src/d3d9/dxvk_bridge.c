@@ -142,7 +142,11 @@ static void unwrap(Wrap *w) {
     if (w->tsh) { for (int k = 0; k < 6 * 16; k++) if (w->tsh[k].guest) gfree(w->tsh[k].guest); free(w->tsh); }
     for (Lock *l = w->locks, *n; l; l = n) { n = l->next; gfree(l->guest); free(l); }
     W32(w->guest + 8, 0);
-    gfree(w->guest);
+    /* The guest object (16 bytes) is not given back to the heap: with it reused, the game's texture loader thread
+     * crashed calling a texture through a corrupted vtable (f_004B9960 from 0x4BF2D0; 2 runs in 3, at the title, on
+     * the PC and on the phone); kept, never (and no call on a released object was seen). A later call on it fails
+     * cleanly and is logged. USF_DXB_FREE=1 gives it back (for comparisons). */
+    if (getenv("USF_DXB_FREE")) gfree(w->guest);
     memset(w, 0, sizeof *w);
     w->nat = (void *)(uintptr_t)freelist;
     freelist = i;
@@ -198,7 +202,11 @@ static int hide_match(const char *list, const char *key) {
 }
 static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     Wrap *w = dxb_of(ARG(0));
-    if (!w) return BAD;
+    if (!w) {
+        static int n;
+        if (n++ < 20) fprintf(stderr, "usf: call on a released Direct3D object %08x method %d from %08x (frame %u)\n", ARG(0), slot, R32(c->esp), g_dev.frames);
+        return BAD;
+    }
     int n;
     const char *s = sigs(w->type, &n)[slot];
     if (s[0] == '*') return special(c, a, w, slot);

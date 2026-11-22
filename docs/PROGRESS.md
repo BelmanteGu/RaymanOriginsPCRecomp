@@ -258,3 +258,18 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   handler (tombstone). The cause itself needs that report from the next crash.
 
 ![The launcher on the Galaxy S23](media/m11-android-launcher.jpg)
+
+## 2026-11-22 — The crash at level loads found and fixed; button icons in texts
+
+- **Crash** (the phone's "a level just closed", SIGSEGV): reproduced on the PC with the new crash report, 2 runs in 3
+  at the title: the texture loader thread (0x8BB4A0 → 0x4BF2D0 → `f_004B9960`) calls a texture's GetLevelDesc through
+  a corrupted vtable. The DXVK bridge gave a released object's 16-byte guest wrapper back to the heap; reused, it was
+  overwritten while still referenced across the loader and render threads. Keeping released wrappers (16 bytes each)
+  : 0 crashes in 7 runs (and no call on a released object seen; such a call now fails cleanly and is logged).
+  `USF_DXB_FREE=1` restores the old behaviour for comparisons.
+- **Crash reports**: on the PC too the report names the lifted function (`-rdynamic`) or module + offset.
+- **Button icons**: the texts carry `[icon:X360_BUTTON_A]`; the PC build rewrites each as "[" + the pad manager's name
+  for it + "]" (method 17 at 0x4B66E0, called from 0x7A72A0), hence "[1-A Button]". `pad_icons.c` answers method 17:
+  with a pad in use (an SDL gamepad, or the touch layer) it returns "icon:<name>", so the tag survives and the text
+  draws the pad button's picture; keyboard only, the key's name stays. `USF_PAD_ICONS=1` forces it (tests). Not yet
+  checked on screen: the machine was busy with other builds.
