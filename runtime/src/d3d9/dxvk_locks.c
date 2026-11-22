@@ -115,6 +115,21 @@ uint32_t dxl_unlock(Wrap *w, int slot, uint32_t key, uint64_t a1, uint64_t a2) {
     Lock *l = dxl_lock_pop(w, key);
     if (l) {
         if (!(l->key & 0x80000000u)) { memcpy(l->host, HOST(l->guest), l->size); copied_tex_out += l->size; }
+        if (w->type == DXB_TEXTURE && !(l->key & 0xFFFFu) && !(l->key & 0x80000000u)) {   /* level 0: content hash */
+            uint32_t base = w->tsh ? w->tsh[0].guest : l->guest, sz = w->tsh ? w->tsh[0].size : l->size;
+            uint32_t h = 2166136261u, n = sz < 4096 ? sz : 4096;                  /* (analysis: USF_HIDE_TEX*) */
+            const uint8_t *b = HOST(base);
+            for (uint32_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; }
+            w->code_hash = h;
+        }
+        if (w->type == DXB_SURFACE && w->parent && !w->plevel && !(l->key & 0x80000000u)) {   /* a texture's level 0 */
+            uint32_t base = w->tsh ? w->tsh[0].guest : l->guest, sz = w->tsh ? w->tsh[0].size : l->size;
+            uint32_t h = 2166136261u, n = sz < 4096 ? sz : 4096;
+            const uint8_t *b = HOST(base);
+            for (uint32_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; }
+            Wrap *t = dxb_of(w->parent);
+            if (t) t->code_hash = h;
+        }
         if (!(l->key & 0x20000000u)) gfree(l->guest);       /* (texture levels keep their copy) */
         free(l);
     }

@@ -215,3 +215,24 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   Positions are measured on the game's own screens; text uses the game's font and colours.
 
 ![The mock-up: home and settings (top: as the game draws them; the port's entries)](media/m9-launcher-mock.jpg)
+
+## 2026-11-22 — The launcher mock-up plays the game's own animations (no recording)
+
+- The title logo and the menu's bars are UbiArt skeleton animations: pieces of an atlas, each drawn as a cubic Bezier
+  patch by the game's `default_PCT_Patch_VS` (the HLSL is in the archive, `shaders/unified/renderpct.fx`): 8 control
+  points per patch (position xy, UV zw) from c17, corner colours from c145, the matrix in c0..c3.
+- `USF_GEO_DUMP=<file>` + `USF_GEO_TEX=#<hash>,...` (`runtime/src/d3d9/dxvk_geodump.c`) writes, for each draw of
+  those textures, the constants and the patch grid. Textures are named by a hash of their level 0 (taken at Unlock,
+  through GetSurfaceLevel and UpdateTexture too); `USF_HIDE_PS` / `USF_HIDE_TEX(_ODD)` / `USF_SHOT_RUN` are the other
+  capture aids.
+- `tools/geo_anim.py` turns a dump into one loop (logo: 121 frames, bars: 90, found where the patches repeat
+  exactly), 30 frames a second, gzip: 224 KB and 74 KB. The mock-up evaluates the same Bezier patches in WebGL over the
+  game's atlases, so the animation is the game's, sharp at any size.
+- Mock-up now: the title screen (animated logo) asks for the Steam folder; the menu with the animated bars and hand;
+  the settings with a Language row; the menu theme (`sound/300_music/310_common/mus_menu_main.wav`, from the archive,
+  looped); "Projeto Belmante" with the channel logo at the bottom left. App icon: `runtime/assets/app_icon.png` (fan
+  art from SteamGridDB, chosen by the user).
+- Seen on the way: the NVIDIA driver failed (kernel `NVRM` RPC errors, `VK_ERROR_DEVICE_LOST` in DXVK, GPU gone until a
+  reboot); the captures were finished on the Intel GPU (`VK_ICD_FILENAMES=.../intel_icd.json`).
+
+![Title, menu and settings of the mock-up](media/m10-launcher-animated.jpg)

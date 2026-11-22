@@ -103,6 +103,22 @@ void dxb_after_present(void *dev, void *chain) {   /* chain: an additional swap 
 
 /* USF_SHOT / USF_SHOT_MS / USF_SHOT_DIR as with the own renderer: the back buffer as PPM */
 static int want_shot(void) {
+    const char *run = getenv("USF_SHOT_RUN");             /* "<ms>:<frames>,...": every frame of each run from <ms> on */
+    if (run) {
+        static uint32_t start[8], k;
+        uint32_t now = usf_ms(), i = 0;
+        for (const char *p = run; *p && i < 8; i++) {
+            uint32_t ms = (uint32_t)strtoul(p, NULL, 10), n = 0;
+            const char *c = strchr(p, ':');
+            if (c) n = (uint32_t)strtoul(c + 1, NULL, 10);
+            if (now >= ms && !start[i]) start[i] = g_dev.frames ? g_dev.frames : 1;
+            if (start[i] && g_dev.frames - start[i] < n) { k++; return 1; }
+            p = strchr(p, ',');
+            if (!p) break;
+            p++;
+        }
+        return 0;
+    }
     const char *lm = getenv("USF_SHOT_MS");
     if (lm) {
         static uint32_t done;

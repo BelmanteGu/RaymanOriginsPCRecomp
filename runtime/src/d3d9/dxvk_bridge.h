@@ -37,6 +37,8 @@ typedef struct {
     void *rb[4];               /* small render targets read back by the CPU: system-memory copies, a ring */
     uint32_t rb_n;             /* readbacks made */
     int rb_open, rb_off;       /* a readback lock is open (no DXVK lock to undo); -1: readback not possible */
+    uint32_t code_hash;        /* shaders: FNV-1a of the bytecode; textures: of level 0's first 4 KB (analysis) */
+    uint32_t parent, plevel;   /* surfaces from GetSurfaceLevel: the texture and the level (analysis) */
     Lock *locks;
 } Wrap;
 

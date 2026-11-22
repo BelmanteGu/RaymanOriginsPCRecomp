@@ -80,5 +80,12 @@ uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, 
         W32(info + 20, kind == 4 ? 4u : kind == 3 ? 5u : 3u); W32(info + 24, 4u);   /* resource type, D3DXIFF_DDS */
     }
     W32(out, dxb_wrap(tex, kind == 4 ? DXB_VOLTEX : kind == 3 ? DXB_CUBE : DXB_TEXTURE));
+    Wrap *w = dxb_of(R32(out));
+    if (w && size > 128) {                                /* (analysis) content hash of the first 4 KB after the header */
+        uint32_t h = 2166136261u, n = size - 128 < 4096 ? size - 128 : 4096;
+        const uint8_t *b = HOST(src + 128);
+        for (uint32_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; }
+        w->code_hash = h;
+    }
     return 0;
 }

@@ -184,6 +184,18 @@ static const char *const *sigs(int type, int *n) {
 
 /* ---- the call ---- */
 static uint32_t special(CPU *c, uint32_t a, Wrap *w, int slot);
+/* (analysis) a comma list of "<w>x<h>x<format>" or "#<content hash>" entries, matched against "<w>x<h>x<format>#<hash>" */
+static int hide_match(const char *list, const char *key) {
+    if (!list) return 0;
+    for (const char *p = list; *p;) {
+        const char *e = strchr(p, ',');
+        size_t n = e ? (size_t)(e - p) : strlen(p);
+        if (n && (p[0] == '#' ? memmem(key, strlen(key), p, n) != NULL : !strncmp(key, p, n) && key[n] == '#')) return 1;
+        if (!e) break;
+        p = e + 1;
+    }
+    return 0;
+}
 static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     Wrap *w = dxb_of(ARG(0));
     if (!w) return BAD;
@@ -213,7 +225,13 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
             break;
         }
     }
-    if (w->type == DXB_DEVICE && (slot == 65 || (slot >= 81 && slot <= 84)) && getenv("USF_HIDE_TEX")) {
+    if (w->type == DXB_DEVICE && (slot == 107 || (slot >= 81 && slot <= 84)) && getenv("USF_HIDE_PS")) {
+        /* (analysis) USF_HIDE_PS=<hash>,...: draws with one of these pixel shaders are skipped (USF_PS_LOG lists them) */
+        static uint32_t ps;
+        if (slot == 107) ps = ARG(1);
+        else { Wrap *p = dxb_of(ps); char key[16]; if (p) { snprintf(key, sizeof key, "%08x", p->code_hash); if (strstr(getenv("USF_HIDE_PS"), key)) return 0; } }
+    }
+    if (w->type == DXB_DEVICE && (slot == 65 || (slot >= 81 && slot <= 84)) && (getenv("USF_HIDE_TEX") || getenv("USF_HIDE_TEX_ODD"))) {
         /* (analysis) USF_HIDE_TEX=<w>x<h>x<format hex>,...: draws whose stage-0 texture is one of these are skipped
          * (e.g. the menu's UI atlases, to capture the scene behind it) */
         static uint32_t tex0;
@@ -223,9 +241,36 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
             uint32_t d[8] = {0};
             dxb_method(t, 17)(t, 0, (uint64_t)(uintptr_t)d, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             char key[48];
-            snprintf(key, sizeof key, "%ux%ux%x", d[6], d[7], d[0]);
-            if (strstr(getenv("USF_HIDE_TEX"), key)) return 0;
+            snprintf(key, sizeof key, "%ux%ux%x#%08x", d[6], d[7], d[0], dxb_of(tex0)->code_hash);
+            if (getenv("USF_TEX_LOG") && strstr(key, getenv("USF_TEX_LOG"))) {   /* each new key, once */
+                static char seen[64][40]; static int ns; int k = 0;
+                while (k < ns && strcmp(seen[k], key)) k++;
+                if (k == ns && ns < 64) { snprintf(seen[ns++], 40, "%s", key); fprintf(stderr, "usf: tex %s (frame %u)\n", key, g_dev.frames); }
+            }
+            if (hide_match(getenv("USF_HIDE_TEX"), key)) return 0;
+            const char *odd = getenv("USF_HIDE_TEX_ODD");          /* only on odd frames: a layer and the scene behind */
+            if ((g_dev.frames & 1) && hide_match(odd, key)) return 0;
         }
+    }
+    if (w->type == DXB_DEVICE && getenv("USF_GEO_DUMP")) {    /* (analysis) dxvk_geodump.c */
+        static uint32_t gtex;
+        void dxb_geo_consts(uint32_t start, uint32_t data, uint32_t count);
+        void dxb_geo_draw(int indexed, uint32_t type, int32_t base, uint32_t first, uint32_t nverts, uint32_t start_index,
+                          uint32_t prims, uint32_t tex_hash);
+        if (slot == 65 && ARG(1) == 0) gtex = ARG(2);
+        if (slot == 94) dxb_geo_consts(ARG(1), ARG(2), ARG(3));
+        if ((slot == 81 || slot == 82) && dxb_of(gtex)) {
+            char key[12];
+            snprintf(key, sizeof key, "#%08x", dxb_of(gtex)->code_hash);
+            if (getenv("USF_GEO_TEX") && strstr(getenv("USF_GEO_TEX"), key)) {
+                if (slot == 81) dxb_geo_draw(0, ARG(1), 0, ARG(2), 0, 0, ARG(3), dxb_of(gtex)->code_hash);
+                else dxb_geo_draw(1, ARG(1), (int32_t)ARG(2), ARG(3), ARG(4), ARG(5), ARG(6), dxb_of(gtex)->code_hash);
+            }
+        }
+    }
+    if (w->type == DXB_DEVICE && slot == 31) {          /* UpdateTexture: the content hash follows (analysis) */
+        Wrap *from = dxb_of(ARG(1)), *to = dxb_of(ARG(2));
+        if (from && to && from->code_hash) to->code_hash = from->code_hash;
     }
     if (w->type == DXB_DEVICE) switch (slot) {
     case 100: if (ARG(1) < 16) { stream_buf[ARG(1)] = ARG(2); stream_off[ARG(1)] = ARG(3); stream_stride[ARG(1)] = ARG(4); } break;
@@ -274,6 +319,21 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     }
     for (int k = 0; k < nout; k++)
         if (out_at[k]) W32(out_at[k], outs[k] ? dxb_wrap(outs[k], out_type(out_kind[k], outs[k])) : 0);
+    if (w->type == DXB_TEXTURE && slot == 18 && nout && outs[0]) {   /* GetSurfaceLevel: remember the texture */
+        Wrap *sw = dxb_of(R32(out_at[0]));
+        if (sw) { sw->parent = ARG(0); sw->plevel = ARG(1); }
+    }
+    if (w->type == DXB_DEVICE && (slot == 106 || slot == 91) && nout && outs[0] && ARG(1)) {   /* shader: its hash */
+        uint32_t h = 2166136261u, p = ARG(1);
+        for (int i = 0; i < 65536; i++, p += 4) {
+            uint32_t t = R32(p);
+            for (int b = 0; b < 4; b++) { h ^= (t >> (8 * b)) & 255; h *= 16777619u; }
+            if (t == 0x0000FFFFu) break;
+        }
+        Wrap *sw = dxb_of(R32(out_at[0]));
+        if (sw) sw->code_hash = h;
+        if (getenv("USF_PS_LOG") && slot == 106) fprintf(stderr, "usf: pixel shader %08x (frame %u)\n", h, g_dev.frames);
+    }
     return r;
 }
 

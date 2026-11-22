@@ -6,8 +6,10 @@ the game's title menu (the scrolling red bars over the jungle), the settings scr
 (Control / Display / Sound panels, Accept / Cancel), both with the port's own entries.
 Where the pictures come from: the user's own copy of the game, never the repository. The jungle and the bars are
 captures of the game running in this port (USF_HIDE_TEX skips the menu's atlases to get the scene behind it, see
-docs/PROGRESS.md), the panels, fields, arrows, sliders and the font are the game's textures and font02.fnt from
-bundle_PC.ipk, all under private/launcher_study (made by the study commands in docs/PROGRESS.md).
+docs/PROGRESS.md), the panels, fields, arrows, sliders, the font and the
+logo / menu atlases are the game's textures and font02.fnt from bundle_PC.ipk; the logo and bar animations are the
+game's own (tools/geo_anim.py: private/launcher/logo.json.gz, bars.json.gz); the music is the game's
+mus_menu_main.wav (private/launcher/menu_music.ogg). The channel logo is runtime/assets/brand/canal_logo.jpg.
 usage: python3 -I tools/launcher_mock.py   (a Python with numpy and Pillow)
 """
 import base64
@@ -61,9 +63,10 @@ def main():
         "settingscontrolbut", "settingscontrolbutsel", "settingscontrolsbg1", "settingscontrolsbg2", "settingscontrolsbg3",
         "settingsdisplaybg", "settingsplayerbut", "settingsplayerbutsel", "settingsslider", "settingssliderbg",
         "settingssliderbgsel", "settingsslidersel", "settingssoundbg", "settingswindowbut", "settingswindowbutsel")}
-    slots = json.load(open(os.path.join(PNG, "slots.json")))
-    slot_img = {k: uri(Image.open(os.path.join(PNG, "slot_%s.png" % k))) for k in slots}
     bg = Image.open(os.path.join(S, "cap6", "frame_01300.ppm")).convert("RGB")
+    bg_title = Image.open(os.path.join(S, "anim", "frame_01322.ppm")).convert("RGB")   # title scene, logo hidden
+    L = os.path.join(ROOT, "private", "launcher")
+    b64 = lambda path: base64.b64encode(open(path, "rb").read()).decode()
     geo = {   # measured on the game's Options screen at 2340x1080 (private/launcher_study/cap4)
         "ctrlhead": place("settingscontrolsbg1", (448, 184, 1094, 314)),
         "ctrllabels": place("settingscontrolsbg2", (444, 334, 658, 798)),
@@ -88,9 +91,13 @@ def main():
     }
     fnt, fnt_png = font()
     html = open(os.path.join(ROOT, "tools", "launcher_mock.html")).read()
-    for k, v in {"__BG__": uri(bg, "JPEG", 90), "__FONT__": json.dumps(fnt), "__FONTPNG__": fnt_png,
-                 "__TEX__": json.dumps(tex), "__SLOTS__": json.dumps(slots), "__SLOTIMG__": json.dumps(slot_img),
-                 "__GEO__": json.dumps(geo)}.items():
+    for k, v in {"__BG__": uri(bg, "JPEG", 90), "__BGTITLE__": uri(bg_title, "JPEG", 90), "__FONT__": json.dumps(fnt),
+                 "__FONTPNG__": fnt_png, "__TEX__": json.dumps(tex), "__GEO__": json.dumps(geo),
+                 "__CANAL__": "data:image/jpeg;base64," + b64(os.path.join(ROOT, "runtime", "assets", "brand", "canal_logo.jpg")),
+                 "__LOGO_A__": uri(Image.open(os.path.join(PNG, "logo_a.png"))), "__LOGO_B__": uri(Image.open(os.path.join(PNG, "logo_b.png"))),
+                 "__LOGO_C__": uri(Image.open(os.path.join(PNG, "logo_c.png"))), "__BUBBLE__": uri(Image.open(os.path.join(PNG, "bubblemenu_a.png"))),
+                 "__ANIM_LOGO__": b64(os.path.join(L, "logo.json.gz")), "__ANIM_BARS__": b64(os.path.join(L, "bars.json.gz")),
+                 "__MUSIC__": b64(os.path.join(L, "menu_music.ogg"))}.items():
         html = html.replace(k, v)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     open(OUT, "w").write(html)

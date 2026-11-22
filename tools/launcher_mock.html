@@ -1,29 +1,39 @@
 <!doctype html>
-<!-- Template of the launcher mock-up (tools/launcher_mock.py fills the __NAMES__ with the game's pictures from the
-     user's copy; the filled file stays in private/). Keys: arrows / WASD move, Enter / Space choose, Esc back. -->
+<!-- Template of the launcher mock-up (tools/launcher_mock.py fills the __NAMES__ with the game's pictures, animations
+     and music from the user's copy; the filled file stays in private/). Keys: arrows / WASD move, Enter / Space choose,
+     Esc back. The logo and the menu bars are the game's own animations: Bezier patches of its atlases, evaluated here
+     as the game's default_PCT_Patch_VS does (tools/geo_anim.py). -->
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Rayman Origins — launcher</title>
 <style>
 html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
-#stage{position:absolute;left:0;top:0;width:2340px;height:1080px;transform-origin:0 0;background:#000 url(__BG__) 0 0/2340px 1080px no-repeat;overflow:hidden}
+#stage{position:absolute;left:0;top:0;width:2340px;height:1080px;transform-origin:0 0;background:#000;overflow:hidden}
 #stage img,#stage canvas{position:absolute;pointer-events:none}
+.bg{position:absolute;inset:0;width:2340px;height:1080px;transition:opacity .4s}
 .screen{position:absolute;inset:0}
 .anim .screen{transition:opacity .25s}
 .hidden{opacity:0;pointer-events:none}
 .hit{position:absolute;cursor:pointer}
-#rays{position:absolute;inset:0;pointer-events:none;mix-blend-mode:screen;opacity:.0;
-  background:linear-gradient(118deg,transparent 30%,rgba(190,255,240,.10) 38%,transparent 46%,transparent 52%,rgba(190,255,240,.08) 58%,transparent 64%);
-  animation:rays 7s ease-in-out infinite}
-@keyframes rays{0%,100%{opacity:0}50%{opacity:1}}
+#gl{left:0;top:0;width:2340px;height:1080px}
 .pop{animation:pop .22s ease-out}
 @keyframes pop{0%{transform:scale(.92)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+#badge{position:absolute;left:44px;bottom:40px;display:flex;align-items:center;gap:20px;padding:12px 30px 12px 12px;border-radius:14px;
+  background:rgba(20,8,4,.55);border:2px solid rgba(255,150,40,.35);font:600 34px/1 system-ui,sans-serif;color:#f6e7d2;
+  text-decoration:none;z-index:5}
+#badge img{position:static;width:78px;height:78px;border-radius:10px}
+#prompt{animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.45}}
 </style></head><body>
-<div id="stage"><div id="rays"></div>
-  <div id="home" class="screen"></div>
+<div id="stage">
+  <img id="bgTitle" class="bg" src="__BGTITLE__"><img id="bgMenu" class="bg hidden" src="__BG__">
+  <canvas id="gl" width="2340" height="1080"></canvas>
+  <div id="title" class="screen"></div>
+  <div id="home" class="screen hidden"></div>
   <div id="opts" class="screen hidden"></div>
+  <a id="badge" href="https://www.youtube.com/@belmante" target="_blank" rel="noopener"><img src="__CANAL__" alt="">Projeto Belmante</a>
 </div>
 <script>
-const FONT=__FONT__, TEX=__TEX__, SLOTS=__SLOTS__, SLOTIMG=__SLOTIMG__, GEO=__GEO__;
+const FONT=__FONT__, TEX=__TEX__, GEO=__GEO__;
 const atlas=new Image(); atlas.src="__FONTPNG__";
 const stage=document.getElementById('stage');
 function fit(){const s=Math.min(innerWidth/2340,innerHeight/1080);stage.style.transform=`translate(${(innerWidth-2340*s)/2}px,${(innerHeight-1080*s)/2}px) scale(${s})`;}
@@ -46,41 +56,85 @@ function text(str,scale,color,cx,cy,parent,shadow=SHADOW){
 function img(src,box,parent){const i=document.createElement('img');i.src=src;Object.assign(i.style,{left:box[0]+'px',top:box[1]+'px',width:box[2]+'px',height:box[3]+'px'});parent.appendChild(i);return i;}
 function hit(x0,y0,x1,y1,parent,fn){const d=document.createElement('div');d.className='hit';Object.assign(d.style,{left:x0+'px',top:y0+'px',width:(x1-x0)+'px',height:(y1-y0)+'px'});d.onpointerdown=e=>{e.preventDefault();fn();};parent.appendChild(d);}
 
+/* ---- the game's animations: Bezier patches (default_PCT_Patch_VS) of its atlases, in WebGL ---- */
+const gl=document.getElementById('gl').getContext('webgl',{premultipliedAlpha:true,alpha:true});
+const prog=(()=>{const vs=`attribute vec2 p;attribute vec2 uv;attribute vec4 col;varying vec2 v_uv;varying vec4 v_col;
+  void main(){gl_Position=vec4(p,0.,1.);v_uv=uv;v_col=col;}`,
+  fs=`precision mediump float;uniform sampler2D t;varying vec2 v_uv;varying vec4 v_col;void main(){gl_FragColor=texture2D(t,v_uv)*v_col;}`;
+  const mk=(type,src)=>{const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);return s;};
+  const p=gl.createProgram();gl.attachShader(p,mk(gl.VERTEX_SHADER,vs));gl.attachShader(p,mk(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);gl.useProgram(p);return p;})();
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+[['p',2,0],['uv',2,8],['col',4,16]].forEach(([n,k,o])=>{const l=gl.getAttribLocation(prog,n);gl.enableVertexAttribArray(l);gl.vertexAttribPointer(l,k,gl.FLOAT,false,32,o);});
+gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,true);
+const ATLAS={};
+function loadAtlas(name,src){return new Promise(r=>{const i=new Image();i.onload=()=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,i);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);ATLAS[name]=t;r();};i.src=src;});}
+async function loadAnim(b64){const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const s=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));return JSON.parse(await new Response(s).text());}
+const G3=[0,.5,1];
+/* one draw: [atlas, matrix (c0..c3, 1e-5), colour (c13, %), patches, control points (1e-3), corner colours (% or 1)];
+   dy: an extra vertical offset in clip units (the menu's other slots), dim: a colour factor */
+function drawPatches(d,dy=0,dim=1){
+  const [atlas,mi,vc,n,pts,col]=d, m=mi.map(v=>v/1e5), V=[];
+  for(let p=0;p<n;p++){
+    const P=k=>pts.slice((8*p+k)*4,(8*p+k)*4+4).map(v=>v/1e3), C=k=>col===1?[1,1,1,1]:col.slice(16*p+4*k,16*p+4*k+4).map(v=>v/100);
+    const cp=[0,1,2,3,4,5,6,7].map(P), cc=[0,1,2,3].map(C), grid=[];
+    for(const t of G3)for(const s of G3){
+      const L=(a,b)=>a.map((v,i)=>v*(1-t)+b[i]*t), F1=L(cp[0],cp[4]),F1X=L(cp[1],cp[5]),FX2=L(cp[2],cp[6]),F2=L(cp[3],cp[7]), u=1-s;
+      const B=F1.map((v,i)=>v*u*u*u+3*F1X[i]*s*u*u+3*FX2[i]*s*s*u+F2[i]*s*s*s);
+      const x=m[0]*B[0]+m[1]*B[1]+m[3], y=m[4]*B[0]+m[5]*B[1]+m[7]+dy, w=m[12]*B[0]+m[13]*B[1]+m[15];
+      const l1=cc[0].map((v,i)=>v+(cc[1][i]-v)*s), l2=cc[2].map((v,i)=>v+(cc[3][i]-v)*s);
+      const c=l1.map((v,i)=>(v+(l2[i]-v)*t)*vc[i]/100*(i<3?dim:1));
+      grid.push([x/w,y/w,B[2],B[3],c[0]*c[3],c[1]*c[3],c[2]*c[3],c[3]]);
+    }
+    for(let j=0;j<2;j++)for(let i=0;i<2;i++){const a=grid[j*3+i],b=grid[j*3+i+1],c=grid[j*3+i+3],e=grid[j*3+i+4];V.push(...a,...b,...e,...a,...e,...c);}
+  }
+  gl.bindTexture(gl.TEXTURE_2D,ATLAS[atlas]);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(V),gl.STREAM_DRAW);gl.drawArrays(gl.TRIANGLES,0,V.length/8);
+}
+let LOGO=null, BARS=null, t0=performance.now();
+function frameOf(a){const f=Math.floor((performance.now()-t0)/1000*a.fps);return a.frames[f%a.frames.length];}
+
+/* ---- music: the game's menu theme, looped (starts with the first touch / key: browsers need one) ---- */
+let audio=null;
+async function music(){if(audio)return;audio=new AudioContext();const b=Uint8Array.from(atob("__MUSIC__"),c=>c.charCodeAt(0));
+  const buf=await audio.decodeAudioData(b.buffer);const s=audio.createBufferSource();s.buffer=buf;s.loop=true;const g=audio.createGain();g.gain.value=.8;s.connect(g).connect(audio.destination);s.start();}
+addEventListener('pointerdown',music);addEventListener('keydown',music);
+
+/* ---- title: the game's title screen, asking for the player's own game files ---- */
+const title=document.getElementById('title');
+function drawTitle(){title.innerHTML='';
+  const p=text('Select your Rayman Origins folder (Steam)',0.5,WHITE,1170,858,title);p.id='prompt';
+  text('Your own copy is read in place, nothing is downloaded',0.3,'#e8d8c0',1170,948,title);
+  hit(0,0,2340,1080,title,()=>show('home'));}
+
 /* ---- home: the game's title menu, the port's entries ---- */
 const HOME=['Play','Options','Game files','Quit Game'];
-const SLOTY={'-2':220,'-1':383,'0':545,'1':708,'2':868}, SLOTK={'-2':'m2','-1':'m1','0':'c','1':'p1','2':'p2'};
-let sel=0, screen='home';
+let sel=0, screen='title', status='';
 const home=document.getElementById('home');
+function slotY(s){const d=BARS?BARS.frames[0]:null;if(!d)return 545;const m7=s===0?d[0][1][7]/1e5:(s>0?d[s===1?3:4][1][7]/1e5:-d[s===-1?3:4][1][7]/1e5);return (1-m7)/2*1080+4;}
 function drawHome(pop){
   home.innerHTML='';
-  for(let i=0;i<HOME.length;i++){
-    const s=i-sel; if(s<-2||s>2) continue;
-    const k=SLOTK[s], p=SLOTS[k];
-    const b=img(SLOTIMG[k],p,home); if(pop&&s===0) b.classList.add('pop');
-    text(HOME[i], s===0?0.95:0.62, s===0?WHITE:ORANGE, 1170, SLOTY[s], home);
-    hit(p[0],p[1],p[0]+p[2],p[1]+p[3],home,()=>{if(i===sel)choose();else{sel=i;drawHome(true);}});
-  }
+  for(let i=0;i<HOME.length;i++){const s=i-sel;if(s<-2||s>2)continue;
+    const y=slotY(s), c=text(HOME[i],s===0?0.95:0.62,s===0?WHITE:ORANGE,1170,y,home);if(pop&&s===0)c.classList.add('pop');
+    const h=s===0?80:48;hit(700,y-h,1700,y+h,home,()=>{if(i===sel)choose();else{sel=i;drawHome(true);}});}
   text('Port 0.1 - 1.0.32504',0.41,WHITE,2010,974,home);
-  if(status) text(status,0.42,ORANGE,1170,1020,home);
+  if(status)text(status,0.42,ORANGE,1170,1020,home);
 }
-let status='';
-function choose(){
-  const it=HOME[sel];
+function choose(){const it=HOME[sel];
   if(it==='Options'){show('opts');return;}
-  status= it==='Play'?'Starting the game...': it==='Game files'?'Select the game folder (or a .zip)':'Bye!';
-  drawHome(false);
-}
+  if(it==='Game files'){show('title');return;}
+  status=it==='Play'?'Starting the game...':'Bye!';drawHome(false);}
 
 /* ---- options: the game's Options screen, the port's settings ---- */
 const opts=document.getElementById('opts');
 const SIZES=['Off','S','M','L'];
-const ROWS=[ // [label, values]
-  ['Defaults',['RESET']],['Opacity',['50 %','75 %','100 %']],['Stick',['Floating','Fixed']],['Run',['Toggle','Hold']],
-  ['Vibration',['On','Off']],['Pad hides',['On','Off']],['Hand',['Right','Left']],['Show FPS',['Off','On']],['Game files',['Change']]];
+const LANGS=['English','Français','Deutsch','Español','Italiano','Nederlands','Português','Polski','Русский'];
+const ROWS=[['Defaults',['RESET']],['Language',LANGS],['Opacity',['50 %','75 %','100 %']],['Stick',['Floating','Fixed']],['Run',['Toggle','Hold']],
+  ['Vibration',['On','Off']],['Pad hides',['On','Off']],['Show FPS',['Off','On']],['Game files',['Change']]];
 const RES=['2340 x 1080','1950 x 900','1560 x 720','1170 x 540'];
-const st={size:2,rows:[0,1,0,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1};
-let saved=JSON.parse(JSON.stringify(st));
-/* focus order: tabs, 9 rows, resolution, 120 fps, music, sfx, accept, cancel */
+const DEF={size:2,rows:[0,0,1,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1};
+const st=JSON.parse(JSON.stringify(DEF));let saved=JSON.parse(JSON.stringify(st));
 const F=['tabs',...ROWS.map((_,i)=>'row'+i),'res','fps','music','sfx','accept','cancel'];
 let f=0;
 function drawOpts(){
@@ -88,8 +142,7 @@ function drawOpts(){
   img(TEX.settingscontrolsbg1,G.ctrlhead,opts);img(TEX.settingscontrolsbg2,G.ctrllabels,opts);img(TEX.settingscontrolsbg3,G.ctrlvalues,opts);
   img(TEX.settingsdisplaybg,G.display,opts);img(TEX.settingssoundbg,G.sound,opts);
   img(TEX.settingsbackbut,G.accept,opts);img(TEX.settingsbackbut,G.cancel,opts);
-  text('Touch Controls',0.5,WHITE,771,222,opts);
-  text('Size',0.42,on==='tabs'?WHITE:WHITE,548,274,opts);
+  text('Touch Controls',0.5,WHITE,771,222,opts);text('Size',0.42,WHITE,548,274,opts);
   for(let i=0;i<4;i++){const s=i===st.size;img(s?TEX.settingsplayerbutsel:TEX.settingsplayerbut,s?G.tabsel[i]:G.tabs[i],opts);
     text(SIZES[i],0.4,s?WHITE:'#f8e8d8',676+i*114,274,opts);hit(624+i*114,250,728+i*114,296,opts,()=>{f=0;st.size=i;drawOpts();});}
   ROWS.forEach((r,i)=>{const y=362+i*50.75,focus=on==='row'+i;
@@ -115,36 +168,48 @@ function drawOpts(){
   text('Accept',0.52,on==='accept'?WHITE:ORANGE,1324,758,opts);text('Cancel',0.52,on==='cancel'?WHITE:ORANGE,1703,758,opts);
   hit(1158,720,1490,796,opts,accept);hit(1544,722,1862,794,opts,cancel);
 }
-function change(d){
-  const on=F[f];
+function change(d){const on=F[f];
   if(on==='tabs')st.size=(st.size+d+4)%4;
   else if(on.startsWith('row')){const i=+on.slice(3),n=ROWS[i][1].length;
-    if(i===0){Object.assign(st,{size:2,rows:[0,1,0,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1});}
-    else st.rows[i]=(st.rows[i]+d+n)%n;}
+    if(i===0)Object.assign(st,JSON.parse(JSON.stringify(DEF)));else st.rows[i]=(st.rows[i]+d+n)%n;}
   else if(on==='res')st.res=(st.res+d+RES.length)%RES.length;
   else if(on==='fps')st.fps120=!st.fps120;
-  else if(on==='music'||on==='sfx')st[on]=Math.min(1,Math.max(0,Math.round((st[on]+d*0.1)*10)/10));
+  else if(on==='music'||on==='sfx'){st[on]=Math.min(1,Math.max(0,Math.round((st[on]+d*0.1)*10)/10));}
   else if(on==='accept')accept();else if(on==='cancel')cancel();
-  drawOpts();
-}
+  drawOpts();}
 function accept(){saved=JSON.parse(JSON.stringify(st));status='Settings saved';show('home');}
 function cancel(){Object.assign(st,JSON.parse(JSON.stringify(saved)));status='';show('home');}
-function show(s){screen=s;home.classList.toggle('hidden',s!=='home');opts.classList.toggle('hidden',s!=='opts');
-  if(s==='opts'){f=0;drawOpts();}else drawHome(false);}
+function show(s){screen=s;
+  for(const [id,on] of [['title',s==='title'],['home',s==='home'],['opts',s==='opts'],['bgTitle',s==='title'],['bgMenu',s!=='title']])
+    document.getElementById(id).classList.toggle('hidden',!on);
+  if(s==='opts'){f=0;drawOpts();}else if(s==='home')drawHome(false);else drawTitle();}
 
-addEventListener('keydown',e=>{
-  const k=e.key;
-  if(screen==='home'){
+/* ---- the frame: the game's animations under the texts ---- */
+function render(){
+  gl.viewport(0,0,2340,1080);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);
+  if(screen==='title'&&LOGO)for(const d of frameOf(LOGO))drawPatches(d);
+  if(screen==='home'&&BARS){const fr=frameOf(BARS);
+    for(let i=0;i<HOME.length;i++){const s=i-sel;if(s<-2||s>2)continue;
+      if(s===0)for(const d of fr.slice(0,3))drawPatches(d);
+      else{const d=fr[Math.abs(s)===1?3:4];drawPatches(d,s<0?-2*d[1][7]/1e5:0);}}}
+  requestAnimationFrame(render);}
+
+addEventListener('keydown',e=>{const k=e.key;
+  if(screen==='title'){if(k==='Enter'||k===' ')show('home');}
+  else if(screen==='home'){
     if(k==='ArrowDown'||k==='s'){if(sel<HOME.length-1){sel++;drawHome(true);}}
     else if(k==='ArrowUp'||k==='w'){if(sel>0){sel--;drawHome(true);}}
-    else if(k==='Enter'||k===' ')choose();
-  }else{
+    else if(k==='Enter'||k===' ')choose();else if(k==='Escape')show('title');}
+  else{
     if(k==='ArrowDown'||k==='s'){f=Math.min(F.length-1,f+1);drawOpts();}
     else if(k==='ArrowUp'||k==='w'){f=Math.max(0,f-1);drawOpts();}
     else if(k==='ArrowRight'||k==='d')change(1);else if(k==='ArrowLeft'||k==='a')change(-1);
-    else if(k==='Enter'||k===' '){if(['accept','cancel','row0','row8','fps'].includes(F[f])||F[f].startsWith('row'))change(1);}
-    else if(k==='Escape'||k==='Backspace')cancel();
-  }
-});
-atlas.onload=()=>{show(location.hash==='#opts'?'opts':'home');setTimeout(()=>stage.classList.add('anim'),50);};
+    else if(k==='Enter'||k===' ')change(1);else if(k==='Escape'||k==='Backspace')cancel();}});
+
+(async()=>{
+  await Promise.all([loadAtlas('logo_a','__LOGO_A__'),loadAtlas('logo_b','__LOGO_B__'),loadAtlas('logo_c','__LOGO_C__'),loadAtlas('bubble','__BUBBLE__'),
+    new Promise(r=>atlas.complete?r():atlas.onload=r)]);
+  LOGO=await loadAnim("__ANIM_LOGO__");BARS=await loadAnim("__ANIM_BARS__");
+  const h=location.hash.slice(1);show(['title','home','opts'].includes(h)?h:'title');setTimeout(()=>stage.classList.add('anim'),50);render();
+})();
 </script></body></html>
