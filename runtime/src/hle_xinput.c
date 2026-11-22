@@ -4,7 +4,8 @@
  * PlayStation, Switch, generic USB/Bluetooth; plugged before or after the game starts). Rayman only gives default
  * buttons to XInput pads (hle_wmi.c makes the game see one), and then stops reading the keyboard itself, so player 1
  * also gets the keyboard in the game's own PC layout: arrows = d-pad, Space / Enter = A (jump, confirm), S = X
- * (attack), D = Y, Backspace = B (back), Shift = RT (run), Esc = Start (pause), Tab = Back.
+ * (attack), D = Y, Backspace = B (back), Shift = RT (run), Esc = Start (pause), Tab = Back; and the on-screen
+ * controls (touch.c: their pause is Start, their run is RT, their stick is the d-pad and the left stick).
  * USF_PADLOG=1 prints player 1's buttons when they change. What it does not do: rumble (XInputSetState is accepted
  * and ignored), more than 4 pads.
  */
@@ -41,7 +42,7 @@ static int16_t axis(SDL_Gamepad *g, SDL_GamepadAxis a, int invert) {
 #include "d3d9/d3d9.h"
 static uint16_t scripted(uint8_t *lt, uint8_t *rt);
 uint16_t touch_buttons(void);                                  /* the on-screen controls (touch.c) */
-uint16_t usf_scripted_buttons(void) { uint8_t l = 0, r = 0; return scripted(&l, &r) | touch_buttons(); }
+uint16_t usf_scripted_buttons(void) { uint8_t l = 0, r = 0; return scripted(&l, &r); }   /* touch: only through XInput, as a pad */
 static uint16_t scripted(uint8_t *lt, uint8_t *rt) {
     const char *sc = getenv("USF_INPUT");
     if (!sc) return 0;
@@ -106,6 +107,14 @@ uint32_t x_XInputGetState(CPU *c, uint32_t a) {
         if (k[SDL_SCANCODE_D]) b |= 0x8000;                              /* Y */
         if (k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT]) rt = 255;  /* run = RT */
         b |= scripted(&lt, &rt);
+        uint16_t t = touch_buttons();                            /* the on-screen controls (touch.c) */
+        b |= t & 0xF00F;                                         /* A B X Y, d-pad */
+        if (t & 0x0400) b |= 0x0010;                             /* pause = Start */
+        if (t & 0x0200) rt = 255;                                /* run = RT */
+        if (!lx && !ly && (t & 0x000F)) {                        /* the floating stick also as the left stick */
+            lx = (t & 0x0008) ? 32767 : (t & 0x0004) ? -32768 : 0;
+            ly = (t & 0x0001) ? 32767 : (t & 0x0002) ? -32768 : 0;
+        }
     }
     if (getenv("USF_PADLOG") && idx == 0) {                     /* debug: player 1's state when it changes */
         static uint16_t lb = 0xFFFF;

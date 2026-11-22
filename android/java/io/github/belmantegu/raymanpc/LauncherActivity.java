@@ -71,18 +71,19 @@ public class LauncherActivity extends Activity {
     protected void onResume() {
         super.onResume();
         hideBars();
-        if (game != null) { game.resume(); return; }
-        if (!busy) showMenu();
         /* development over adb: am start -n .../.LauncherActivity --es game /sdcard/RaymanOrigins [--ez play true] */
         Intent in = getIntent();
         String g = in != null ? in.getStringExtra("game") : null;
+        boolean go = false;
+        if (g != null) android.util.Log.i("RaymanLauncher", "adb game " + g + " -> " + isGame(g) + " (" + java.util.Arrays.toString(new File(g).list()) + ")");
         if (g != null && isGame(g)) {
             prefs().edit().putString("game", g).apply();
-            boolean go = in.getBooleanExtra("play", false);
+            go = in.getBooleanExtra("play", false);
             setIntent(new Intent());
-            showMenu();
-            if (go) play();
         }
+        if (game != null) game.resume();
+        else if (!busy) showMenu();
+        if (go) play();
     }
 
     @Override

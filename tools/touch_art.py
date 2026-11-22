@@ -12,7 +12,7 @@ import sys
 from PIL import Image
 
 SIZE = 256
-ART_NAMES = ["btn_jump", "btn_attack", "btn_back", "btn_run", "btn_pause", "stick_base", "stick_knob"]  # touch.c ART_*
+ART_NAMES = ["btn_jump", "btn_attack", "btn_back", "btn_run", "btn_pause", "stick_base", "stick_knob", "btn_settings"]  # touch.c ART_*
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

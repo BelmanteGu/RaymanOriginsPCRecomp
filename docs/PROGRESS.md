@@ -288,3 +288,22 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
 - Button icons: method 16 (an action's binding name, 0x4B7080) and method 17 are answered with icon tags when a pad
   is in use (the binding is read from the pad manager's tables, so it works in every language). The world map's
   hints still show "[1-X Button]": they are built another way, still being traced.
+
+## 2026-11-22 — Touch jumps again; the game's pause and the port's menu are separate buttons
+
+![The port's menu (top); in a level, a touch on A: before, in the air, landed, the floating stick](media/m12-touch-port-menu.jpg)
+
+- **"Can't jump" (Galaxy A56)**: since the game sees an XInput pad (hle_wmi.c, for USB controllers) it reads player 1
+  only from XInput, but the on-screen controls were fed as keys and DirectInput. Menus still answered (keys, mouse
+  from touch), play did not. The touch bits now go to player 1's XInput state, and only there (as keys too, one tap
+  could count twice): A B X Y and the d-pad as they are, pause = Start, run = RT, the floating stick also as the left
+  stick. Checked on the PC with scripted fingers: a touch on A in a level makes Rayman jump.
+- **Two buttons at the top right**: pause (the game's own pause menu, Start) and, under it, a gear (the drawing made
+  for the X360 port) that opens the **port's menu**. Before, one button did both and the port's bar guessed whether
+  the game was paused, so it could stay on screen and eat taps.
+- **The port's menu** is a panel in the game's pause-board red: touch controls on/off, size, opacity, run (toggle or
+  hold, the launcher's `runhold`), close; in the launcher's language (en fr de es it pt; the others in English); the
+  120 fps entry is gone (hidden, as asked). A tap outside or on the gear closes it; the game gets no touch input
+  while it is open.
+- Launcher: the adb development intent (`--es game <folder> --ez play true`) was skipped by the new menu; fixed. Tested
+  on a Galaxy A56 (Exynos 1580, Xclipse 540): menu and first level at 60 fps, no crash.
