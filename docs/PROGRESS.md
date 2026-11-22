@@ -273,3 +273,18 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   with a pad in use (an SDL gamepad, or the touch layer) it returns "icon:<name>", so the tag survives and the text
   draws the pad button's picture; keyboard only, the key's name stays. `USF_PAD_ICONS=1` forces it (tests). Not yet
   checked on screen: the machine was busy with other builds.
+
+## 2026-11-22 — The crash's real cause: stale surface wrappers in the DXVK bridge
+
+- Keeping released wrappers (previous entry) did not fix it: the same crash came back (2 of 2 runs to the world map).
+  The texture pointer the loader read was 1, not a corrupted pointer. With the own renderer (`USF_DXVK=0`) the same
+  runs never crash, so the cause was in the bridge.
+- Cause: a texture level's surface (GetSurfaceLevel) has the texture's reference count in DXVK, so its wrapper never
+  saw a final Release and outlived the texture. When DXVK later put another object at the same address, the bridge
+  found the old wrapper and handed the game an object of the wrong kind.
+- Fix: a texture's (cube's, volume texture's) level wrappers are detached when it is released, and a wrapper found
+  for an address with another kind of object is replaced. 4 of 4 runs of 90 s to the world map, no crash (before:
+  a crash in the first 30 s).
+- Button icons: method 16 (an action's binding name, 0x4B7080) and method 17 are answered with icon tags when a pad
+  is in use (the binding is read from the pad manager's tables, so it works in every language). The world map's
+  hints still show "[1-X Button]": they are built another way, still being traced.

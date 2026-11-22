@@ -111,6 +111,17 @@ Wrap *dxb_of(uint32_t g) {
 void *dxb_nat(uint32_t g) { Wrap *w = dxb_of(g); return w ? w->nat : NULL; }
 
 static uint32_t vtable_of(int type);
+/* (wlock held) a wrapper whose DXVK object is gone without a final Release seen here: a texture level's surface (its
+ * references are the texture's), or a stale entry. Its guest object stays (calls on it fail cleanly, see unwrap). */
+static void detach_locked(uint32_t i) {
+    Wrap *w = &wraps[i];
+    hdel(w->nat);
+    if (w->tsh) { for (int k = 0; k < 6 * 16; k++) if (w->tsh[k].guest) gfree(w->tsh[k].guest); free(w->tsh); }
+    W32(w->guest + 8, 0);
+    memset(w, 0, sizeof *w);
+    w->nat = (void *)(uintptr_t)freelist;
+    freelist = i;
+}
 uint32_t dxb_wrap(void *nat, int type) {
     if (!nat) return 0;
     pthread_mutex_lock(&wlock);
@@ -120,6 +131,11 @@ uint32_t dxb_wrap(void *nat, int type) {
         hvals = calloc(HASH, sizeof *hvals);
     }
     uint32_t i = hfind(nat);
+    /* the same DXVK address with another kind of object: the old one is gone (its memory reused), its wrapper is stale */
+    if (i && wraps[i].type != type && !(type == DXB_TEXTURE && (wraps[i].type == DXB_CUBE || wraps[i].type == DXB_VOLTEX))) {
+        detach_locked(i);
+        i = 0;
+    }
     if (i) { pthread_mutex_unlock(&wlock); return wraps[i].guest; }
     if (freelist) { i = freelist; freelist = (uint32_t)(uintptr_t)wraps[i].nat; }
     else if (nwraps < MAXW) i = nwraps++;
@@ -137,6 +153,9 @@ uint32_t dxb_wrap(void *nat, int type) {
 static void unwrap(Wrap *w) {
     pthread_mutex_lock(&wlock);
     uint32_t i = (uint32_t)(w - wraps);
+    if (w->type == DXB_TEXTURE || w->type == DXB_CUBE || w->type == DXB_VOLTEX)   /* its levels' surfaces / volumes */
+        for (uint32_t j = 1; j < nwraps; j++)
+            if (j != i && wraps[j].guest && wraps[j].parent == w->guest) detach_locked(j);
     hdel(w->nat);
     if (w->shadow) gfree(w->shadow);
     if (w->tsh) { for (int k = 0; k < 6 * 16; k++) if (w->tsh[k].guest) gfree(w->tsh[k].guest); free(w->tsh); }
@@ -327,9 +346,9 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     }
     for (int k = 0; k < nout; k++)
         if (out_at[k]) W32(out_at[k], outs[k] ? dxb_wrap(outs[k], out_type(out_kind[k], outs[k])) : 0);
-    if (w->type == DXB_TEXTURE && slot == 18 && nout && outs[0]) {   /* GetSurfaceLevel: remember the texture */
-        Wrap *sw = dxb_of(R32(out_at[0]));
-        if (sw) { sw->parent = ARG(0); sw->plevel = ARG(1); }
+    if ((w->type == DXB_TEXTURE || w->type == DXB_CUBE || w->type == DXB_VOLTEX) && slot == 18 && nout && outs[0]) {
+        Wrap *sw = dxb_of(R32(out_at[0]));                    /* a level's surface / volume: remember the texture */
+        if (sw) { sw->parent = ARG(0); sw->plevel = w->type == DXB_CUBE ? ARG(1) << 8 | ARG(2) : ARG(1); }
     }
     if (w->type == DXB_DEVICE && (slot == 106 || slot == 91) && nout && outs[0] && ARG(1)) {   /* shader: its hash */
         uint32_t h = 2166136261u, p = ARG(1);

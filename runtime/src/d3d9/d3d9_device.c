@@ -321,6 +321,7 @@ static uint32_t Reset(CPU *c, uint32_t a) {                     /* a new size (t
  * that comes late resets the schedule instead of being caught up. */
 void game_pace(void);
 void game_pace(void) {
+    { void pad_icons_frame(void); pad_icons_frame(); }       /* button icons or key names in texts (pad_icons.c) */
     static double next;
     const char *e = getenv("RAYMAN_FPS");                        /* read every frame: the touch settings change it */
     int fps = e ? atoi(e) : 60;
