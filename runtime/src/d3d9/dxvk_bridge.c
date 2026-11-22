@@ -213,6 +213,20 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
             break;
         }
     }
+    if (w->type == DXB_DEVICE && (slot == 65 || (slot >= 81 && slot <= 84)) && getenv("USF_HIDE_TEX")) {
+        /* (analysis) USF_HIDE_TEX=<w>x<h>x<format hex>,...: draws whose stage-0 texture is one of these are skipped
+         * (e.g. the menu's UI atlases, to capture the scene behind it) */
+        static uint32_t tex0;
+        if (slot == 65) { if (ARG(1) == 0) tex0 = ARG(2); }
+        else if (tex0 && dxb_nat(tex0) && dxb_of(tex0)->type == DXB_TEXTURE) {
+            void *t = dxb_nat(tex0);
+            uint32_t d[8] = {0};
+            dxb_method(t, 17)(t, 0, (uint64_t)(uintptr_t)d, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            char key[48];
+            snprintf(key, sizeof key, "%ux%ux%x", d[6], d[7], d[0]);
+            if (strstr(getenv("USF_HIDE_TEX"), key)) return 0;
+        }
+    }
     if (w->type == DXB_DEVICE) switch (slot) {
     case 100: if (ARG(1) < 16) { stream_buf[ARG(1)] = ARG(2); stream_off[ARG(1)] = ARG(3); stream_stride[ARG(1)] = ARG(4); } break;
     case 102: if (ARG(1) < 16) stream_freq[ARG(1)] = ARG(2); break;

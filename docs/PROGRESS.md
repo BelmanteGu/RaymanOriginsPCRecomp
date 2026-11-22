@@ -198,3 +198,20 @@ Verified on the PC with the touch layer on (`RAYMAN_TOUCH=1`) and scripted finge
   the S23). The runtime loads it next to `libmain.so` through the same bridge as on the PC.
 - Installed on the Galaxy S23 with the game folder in `Games/RaymanOrigins`: **the user played it, it runs well**,
   with the drawn touch controls.
+
+## 2026-11-22 — A launcher in the game's own look (HTML mock-up)
+
+- Studied the PC build's title menu (`scene/menus/mainmenu`: buttons from the `bubblemenu_a` atlas animated by a
+  skeleton, the scene `menumainbackground_v2`) and its Options screen (`scene/menus/inputconfiguration`: plain 2D
+  textures for panels, fields, arrows, sliders, check box; text in `font02.fnt`).
+- `USF_HIDE_TEX=<w>x<h>x<format>,...` (analysis, in the DXVK bridge) skips draws whose stage-0 texture matches: with
+  the menu atlas (1024x512 DXT3) and the font (1024x1024 DXT3) hidden, the game renders the jungle behind its menu,
+  and with only the font hidden, the bars without text. The captures (2340x1080, the S23's shape) are deterministic,
+  so bars minus scene gives each carousel slot as a picture.
+- `tools/launcher_mock.py` + `tools/launcher_mock.html` build `private/launcher/launcher.html` (game pictures from the
+  user's copy, so it stays in private/): the home is the game's scrolling bars with the port's entries (Play, Options,
+  Game files, Quit Game); the settings are the game's Options screen with the port's settings (touch controls size,
+  opacity, stick, run, vibration...; resolution, 120 fps; volumes; Accept / Cancel). Keyboard, mouse and touch.
+  Positions are measured on the game's own screens; text uses the game's font and colours.
+
+![The mock-up: home and settings (top: as the game draws them; the port's entries)](media/m9-launcher-mock.jpg)

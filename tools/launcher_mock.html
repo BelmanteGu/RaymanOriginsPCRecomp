@@ -1,0 +1,150 @@
+<!doctype html>
+<!-- Template of the launcher mock-up (tools/launcher_mock.py fills the __NAMES__ with the game's pictures from the
+     user's copy; the filled file stays in private/). Keys: arrows / WASD move, Enter / Space choose, Esc back. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Rayman Origins — launcher</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+#stage{position:absolute;left:0;top:0;width:2340px;height:1080px;transform-origin:0 0;background:#000 url(__BG__) 0 0/2340px 1080px no-repeat;overflow:hidden}
+#stage img,#stage canvas{position:absolute;pointer-events:none}
+.screen{position:absolute;inset:0}
+.anim .screen{transition:opacity .25s}
+.hidden{opacity:0;pointer-events:none}
+.hit{position:absolute;cursor:pointer}
+#rays{position:absolute;inset:0;pointer-events:none;mix-blend-mode:screen;opacity:.0;
+  background:linear-gradient(118deg,transparent 30%,rgba(190,255,240,.10) 38%,transparent 46%,transparent 52%,rgba(190,255,240,.08) 58%,transparent 64%);
+  animation:rays 7s ease-in-out infinite}
+@keyframes rays{0%,100%{opacity:0}50%{opacity:1}}
+.pop{animation:pop .22s ease-out}
+@keyframes pop{0%{transform:scale(.92)}60%{transform:scale(1.04)}100%{transform:scale(1)}}
+</style></head><body>
+<div id="stage"><div id="rays"></div>
+  <div id="home" class="screen"></div>
+  <div id="opts" class="screen hidden"></div>
+</div>
+<script>
+const FONT=__FONT__, TEX=__TEX__, SLOTS=__SLOTS__, SLOTIMG=__SLOTIMG__, GEO=__GEO__;
+const atlas=new Image(); atlas.src="__FONTPNG__";
+const stage=document.getElementById('stage');
+function fit(){const s=Math.min(innerWidth/2340,innerHeight/1080);stage.style.transform=`translate(${(innerWidth-2340*s)/2}px,${(innerHeight-1080*s)/2}px) scale(${s})`;}
+addEventListener('resize',fit);fit();
+
+/* ---- the game's font (font02.fnt): glyphs tinted, with the game's dark drop shadow ---- */
+const ORANGE='#f89018', WHITE='#f8f8f8', SHADOW='#200000';
+function text(str,scale,color,cx,cy,parent,shadow=SHADOW){
+  const ch=[...str].map(c=>FONT.chars[c.codePointAt(0)]||FONT.chars[63]);
+  const w=ch.reduce((s,g)=>s+g[6],0)*scale, pad=12, sh=Math.max(2,scale*7);
+  const W=Math.ceil(w+pad*2+sh), H=Math.ceil(FONT.line*scale+pad*2+sh);
+  const m=document.createElement('canvas');m.width=W;m.height=H;const mx=m.getContext('2d');
+  let x=pad;for(const g of ch){mx.drawImage(atlas,g[0],g[1],g[2],g[3],x+g[4]*scale,pad+g[5]*scale,g[2]*scale,g[3]*scale);x+=g[6]*scale;}
+  const tint=col=>{const t=document.createElement('canvas');t.width=W;t.height=H;const tx=t.getContext('2d');tx.drawImage(m,0,0);tx.globalCompositeOperation='source-in';tx.fillStyle=col;tx.fillRect(0,0,W,H);return t;};
+  const c=document.createElement('canvas');c.width=W;c.height=H;const cx2=c.getContext('2d');
+  if(shadow)cx2.drawImage(tint(shadow),sh*.55,sh);cx2.drawImage(tint(color),0,0);
+  c.style.left=(cx-pad-w/2)+'px';c.style.top=(cy-pad-57*scale)+'px';
+  parent.appendChild(c);return c;
+}
+function img(src,box,parent){const i=document.createElement('img');i.src=src;Object.assign(i.style,{left:box[0]+'px',top:box[1]+'px',width:box[2]+'px',height:box[3]+'px'});parent.appendChild(i);return i;}
+function hit(x0,y0,x1,y1,parent,fn){const d=document.createElement('div');d.className='hit';Object.assign(d.style,{left:x0+'px',top:y0+'px',width:(x1-x0)+'px',height:(y1-y0)+'px'});d.onpointerdown=e=>{e.preventDefault();fn();};parent.appendChild(d);}
+
+/* ---- home: the game's title menu, the port's entries ---- */
+const HOME=['Play','Options','Game files','Quit Game'];
+const SLOTY={'-2':220,'-1':383,'0':545,'1':708,'2':868}, SLOTK={'-2':'m2','-1':'m1','0':'c','1':'p1','2':'p2'};
+let sel=0, screen='home';
+const home=document.getElementById('home');
+function drawHome(pop){
+  home.innerHTML='';
+  for(let i=0;i<HOME.length;i++){
+    const s=i-sel; if(s<-2||s>2) continue;
+    const k=SLOTK[s], p=SLOTS[k];
+    const b=img(SLOTIMG[k],p,home); if(pop&&s===0) b.classList.add('pop');
+    text(HOME[i], s===0?0.95:0.62, s===0?WHITE:ORANGE, 1170, SLOTY[s], home);
+    hit(p[0],p[1],p[0]+p[2],p[1]+p[3],home,()=>{if(i===sel)choose();else{sel=i;drawHome(true);}});
+  }
+  text('Port 0.1 - 1.0.32504',0.41,WHITE,2010,974,home);
+  if(status) text(status,0.42,ORANGE,1170,1020,home);
+}
+let status='';
+function choose(){
+  const it=HOME[sel];
+  if(it==='Options'){show('opts');return;}
+  status= it==='Play'?'Starting the game...': it==='Game files'?'Select the game folder (or a .zip)':'Bye!';
+  drawHome(false);
+}
+
+/* ---- options: the game's Options screen, the port's settings ---- */
+const opts=document.getElementById('opts');
+const SIZES=['Off','S','M','L'];
+const ROWS=[ // [label, values]
+  ['Defaults',['RESET']],['Opacity',['50 %','75 %','100 %']],['Stick',['Floating','Fixed']],['Run',['Toggle','Hold']],
+  ['Vibration',['On','Off']],['Pad hides',['On','Off']],['Hand',['Right','Left']],['Show FPS',['Off','On']],['Game files',['Change']]];
+const RES=['2340 x 1080','1950 x 900','1560 x 720','1170 x 540'];
+const st={size:2,rows:[0,1,0,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1};
+let saved=JSON.parse(JSON.stringify(st));
+/* focus order: tabs, 9 rows, resolution, 120 fps, music, sfx, accept, cancel */
+const F=['tabs',...ROWS.map((_,i)=>'row'+i),'res','fps','music','sfx','accept','cancel'];
+let f=0;
+function drawOpts(){
+  opts.innerHTML='';const G=GEO,on=F[f];
+  img(TEX.settingscontrolsbg1,G.ctrlhead,opts);img(TEX.settingscontrolsbg2,G.ctrllabels,opts);img(TEX.settingscontrolsbg3,G.ctrlvalues,opts);
+  img(TEX.settingsdisplaybg,G.display,opts);img(TEX.settingssoundbg,G.sound,opts);
+  img(TEX.settingsbackbut,G.accept,opts);img(TEX.settingsbackbut,G.cancel,opts);
+  text('Touch Controls',0.5,WHITE,771,222,opts);
+  text('Size',0.42,on==='tabs'?WHITE:WHITE,548,274,opts);
+  for(let i=0;i<4;i++){const s=i===st.size;img(s?TEX.settingsplayerbutsel:TEX.settingsplayerbut,s?G.tabsel[i]:G.tabs[i],opts);
+    text(SIZES[i],0.4,s?WHITE:'#f8e8d8',676+i*114,274,opts);hit(624+i*114,250,728+i*114,296,opts,()=>{f=0;st.size=i;drawOpts();});}
+  ROWS.forEach((r,i)=>{const y=362+i*50.75,focus=on==='row'+i;
+    text(r[0],0.4,focus?WHITE:ORANGE,551,y,opts);
+    img(focus?TEX.settingscontrolbutsel:TEX.settingscontrolbut,focus?G.fieldsel[i]:G.field[i],opts);
+    text(r[1][st.rows[i]],0.33,focus?WHITE:'#f8ece0',881,y,opts);
+    hit(444,y-25,1092,y+25,opts,()=>{if(f===i+1)change(1);else f=i+1;drawOpts();});});
+  text('Display Options',0.5,WHITE,1513,220,opts);
+  text('Resolution',0.42,on==='res'?'#ffd040':WHITE,1278,297,opts);
+  img(TEX.settingscontrolbutsel,G.resfield,opts);
+  img(on==='res'?TEX.settingsarrowleftsel:TEX.settingsarrowleft,G.arrowl,opts);img(on==='res'?TEX.settingsarrowrightsel:TEX.settingsarrowright,G.arrowr,opts);
+  text(RES[st.res],0.47,WHITE,1624,297,opts,'#503808');
+  hit(1396,256,1520,334,opts,()=>{f=F.indexOf('res');change(-1);});hit(1700,256,1852,334,opts,()=>{f=F.indexOf('res');change(1);});
+  text('120 FPS',0.42,on==='fps'?'#ffd040':WHITE,1670,372,opts);
+  img(st.fps120?TEX.settingswindowbutsel:TEX.settingswindowbut,st.fps120?G.checkon:G.check,opts);
+  hit(1560,346,1840,398,opts,()=>{f=F.indexOf('fps');change(1);});
+  text('Sound Options',0.5,WHITE,1509,485,opts);
+  ['music','sfx'].forEach((k,i)=>{const y=555+i*72,focus=on===k;
+    text(k==='music'?'Music Volume':'SFX Volume',0.42,focus?WHITE:ORANGE,1305,y,opts);
+    img(focus?TEX.settingssliderbgsel:TEX.settingssliderbg,focus?G.slidersel[i]:G.slider[i],opts);
+    const kb=G.knob[i].slice();kb[0]=1474+st[k]*346-kb[2]/2+8;img(focus?TEX.settingsslidersel:TEX.settingsslider,kb,opts);
+    hit(1460,y-30,1860,y+35,opts,()=>{f=F.indexOf(k);});});
+  text('Accept',0.52,on==='accept'?WHITE:ORANGE,1324,758,opts);text('Cancel',0.52,on==='cancel'?WHITE:ORANGE,1703,758,opts);
+  hit(1158,720,1490,796,opts,accept);hit(1544,722,1862,794,opts,cancel);
+}
+function change(d){
+  const on=F[f];
+  if(on==='tabs')st.size=(st.size+d+4)%4;
+  else if(on.startsWith('row')){const i=+on.slice(3),n=ROWS[i][1].length;
+    if(i===0){Object.assign(st,{size:2,rows:[0,1,0,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1});}
+    else st.rows[i]=(st.rows[i]+d+n)%n;}
+  else if(on==='res')st.res=(st.res+d+RES.length)%RES.length;
+  else if(on==='fps')st.fps120=!st.fps120;
+  else if(on==='music'||on==='sfx')st[on]=Math.min(1,Math.max(0,Math.round((st[on]+d*0.1)*10)/10));
+  else if(on==='accept')accept();else if(on==='cancel')cancel();
+  drawOpts();
+}
+function accept(){saved=JSON.parse(JSON.stringify(st));status='Settings saved';show('home');}
+function cancel(){Object.assign(st,JSON.parse(JSON.stringify(saved)));status='';show('home');}
+function show(s){screen=s;home.classList.toggle('hidden',s!=='home');opts.classList.toggle('hidden',s!=='opts');
+  if(s==='opts'){f=0;drawOpts();}else drawHome(false);}
+
+addEventListener('keydown',e=>{
+  const k=e.key;
+  if(screen==='home'){
+    if(k==='ArrowDown'||k==='s'){if(sel<HOME.length-1){sel++;drawHome(true);}}
+    else if(k==='ArrowUp'||k==='w'){if(sel>0){sel--;drawHome(true);}}
+    else if(k==='Enter'||k===' ')choose();
+  }else{
+    if(k==='ArrowDown'||k==='s'){f=Math.min(F.length-1,f+1);drawOpts();}
+    else if(k==='ArrowUp'||k==='w'){f=Math.max(0,f-1);drawOpts();}
+    else if(k==='ArrowRight'||k==='d')change(1);else if(k==='ArrowLeft'||k==='a')change(-1);
+    else if(k==='Enter'||k===' '){if(['accept','cancel','row0','row8','fps'].includes(F[f])||F[f].startsWith('row'))change(1);}
+    else if(k==='Escape'||k==='Backspace')cancel();
+  }
+});
+atlas.onload=()=>{show(location.hash==='#opts'?'opts':'home');setTimeout(()=>stage.classList.add('anim'),50);};
+</script></body></html>
