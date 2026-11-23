@@ -43,9 +43,10 @@ uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, 
     if (want && want < 0xFFFFFFF0u && want < levels) levels = want;
     void *tex = NULL;
     int32_t r;
+    uint32_t bc = kind != 4 && dxe_on() && dxe_block(fmt) ? fmt : 0, mk = bc ? 32u : fmt;   /* (dxvk_bcemu.c) */
     if (kind == 4) r = (int32_t)dxb_method(dev, 24)(dev, width, height, depth, levels, usage, fmt, pool, (uint64_t)(uintptr_t)&tex, 0, 0, 0);
-    else if (kind == 3) r = (int32_t)dxb_method(dev, 25)(dev, width, levels, usage, fmt, pool, (uint64_t)(uintptr_t)&tex, 0, 0, 0, 0, 0);
-    else r = (int32_t)dxb_method(dev, 23)(dev, width, height, levels, usage, fmt, pool, (uint64_t)(uintptr_t)&tex, 0, 0, 0, 0);
+    else if (kind == 3) r = (int32_t)dxb_method(dev, 25)(dev, width, levels, usage, mk, pool, (uint64_t)(uintptr_t)&tex, 0, 0, 0, 0, 0);
+    else r = (int32_t)dxb_method(dev, 23)(dev, width, height, levels, usage, mk, pool, (uint64_t)(uintptr_t)&tex, 0, 0, 0, 0);
     if (r < 0 || !tex) return r < 0 ? (uint32_t)r : D3DXERR_INVALIDDATA;
     uint32_t p = src + 128, end = src + size;
     int faces = is_cube ? 6 : 1;
@@ -67,7 +68,8 @@ uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, 
                         ? (int32_t)dxb_method(tex, 19)(tex, (uint64_t)f, l, (uint64_t)(uintptr_t)&lr, 0, 0, 0, 0, 0, 0, 0, 0)
                         : (int32_t)dxb_method(tex, 19)(tex, l, (uint64_t)(uintptr_t)&lr, 0, 0, 0, 0, 0, 0, 0, 0, 0);
                     if (lk >= 0) {
-                        copy_rows(lr.bits, (uint32_t)lr.pitch, p, fmt, lw, lh, 1, 0);
+                        if (bc) dxe_decode(fmt, HOST(p), (lw + 3) / 4 * (fmt == 0x31545844u ? 8u : 16u), (lh + 3) / 4, lr.bits, (uint32_t)lr.pitch, lw, lh);
+                        else copy_rows(lr.bits, (uint32_t)lr.pitch, p, fmt, lw, lh, 1, 0);
                         if (kind == 3) dxb_method(tex, 20)(tex, (uint64_t)f, l, 0, 0, 0, 0, 0, 0, 0, 0, 0);
                         else dxb_method(tex, 20)(tex, l, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
                     }
@@ -81,6 +83,7 @@ uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, 
     }
     W32(out, dxb_wrap(tex, kind == 4 ? DXB_VOLTEX : kind == 3 ? DXB_CUBE : DXB_TEXTURE));
     Wrap *w = dxb_of(R32(out));
+    if (w) w->bcfmt = bc;
     if (w && size > 128) {                                /* (analysis) content hash of the first 4 KB after the header */
         uint32_t h = 2166136261u, n = size - 128 < 4096 ? size - 128 : 4096;
         const uint8_t *b = HOST(src + 128);

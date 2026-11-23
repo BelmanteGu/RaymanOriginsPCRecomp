@@ -47,6 +47,10 @@ uint32_t dxl_lock_rect(Wrap *w, int slot, uint64_t face, uint64_t level, uint32_
     if (r < 0) return (uint32_t)r;
     int blk = dxl_block_format(desc[0]);
     uint32_t pitch = (uint32_t)lr.pitch, rows = blk ? (desc[7] + 3) / 4 : desc[7], full = pitch * rows;
+    if (w->bcfmt) {                                      /* DXT made as RGBA8: the game's copy keeps DXT's pitch */
+        pitch = (desc[6] + 3) / 4 * (desc[0] == 0x31545844u ? 8u : 16u);
+        full = pitch * rows;
+    }
     if (!w->tsh) w->tsh = calloc(6 * 16, sizeof *w->tsh);
     TexShadow *ts = &w->tsh[(face % 6) * 16 + (level & 15)];
     if (!ts->guest || ts->size != full) {
@@ -56,7 +60,7 @@ uint32_t dxl_lock_rect(Wrap *w, int slot, uint64_t face, uint64_t level, uint32_
         ts->epoch = 0;
     }
     int gpu_written = (desc[2] & 3u) != 0;                 /* D3DUSAGE_RENDERTARGET / DEPTHSTENCIL */
-    if (!(flags & LOCK_DISCARD) && (ts->epoch != gpu_epoch || gpu_written)) { memcpy(HOST(ts->guest), lr.bits, full); copied_tex_in += full; }
+    if (!(flags & LOCK_DISCARD) && !w->bcfmt && (ts->epoch != gpu_epoch || gpu_written)) { memcpy(HOST(ts->guest), lr.bits, full); copied_tex_in += full; }
     ts->epoch = gpu_epoch;
     uint32_t y0 = 0, y1 = rows, xoff = 0;
     if (g_rect) {
@@ -67,7 +71,12 @@ uint32_t dxl_lock_rect(Wrap *w, int slot, uint64_t face, uint64_t level, uint32_
         xoff = blk ? (left / 4) * (desc[0] == 0x31545844u ? 8u : 16u) : left * d3d_format_bpp(desc[0]) / 8;
     }
     dxl_lock_push(w, key | 0x20000000u | (flags & LOCK_READONLY ? 0x80000000u : 0), ts->guest + y0 * pitch,
-              (y1 > y0 ? y1 - y0 : 0) * pitch, lr.bits + (size_t)y0 * pitch);
+              (y1 > y0 ? y1 - y0 : 0) * pitch, lr.bits + (size_t)y0 * (w->bcfmt ? 4u * (uint32_t)lr.pitch : pitch));
+    if (w->bcfmt) {
+        Lock *l = w->locks;
+        l->bc = desc[0]; l->gp = pitch; l->np = (uint32_t)lr.pitch;
+        l->w = desc[6]; l->h = desc[7] > y0 * 4 ? desc[7] - y0 * 4 : 0;
+    }
     W32(g_lr, pitch);
     W32(g_lr + 4, ts->guest + y0 * pitch + xoff);
     return 0;
@@ -120,7 +129,9 @@ uint32_t dxl_unlock(Wrap *w, int slot, uint32_t key, uint64_t a1, uint64_t a2) {
             else if (w->type == DXB_SURFACE && w->parent && !(l->key & 0x80000000u))   /* a level through GetSurfaceLevel */
                 pad_icons_level(dxb_of(w->parent), w->plevel, HOST(l->guest), l->size);
         }
-        if (!(l->key & 0x80000000u)) { memcpy(l->host, HOST(l->guest), l->size); copied_tex_out += l->size; }
+        if (l->bc && !(l->key & 0x80000000u))             /* emulated DXT: decoded into DXVK's RGBA8 level */
+            dxe_decode(l->bc, HOST(l->guest), l->gp, l->gp ? l->size / l->gp : 0, l->host, l->np, l->w, l->h);
+        else if (!(l->key & 0x80000000u)) { memcpy(l->host, HOST(l->guest), l->size); copied_tex_out += l->size; }
         if (w->type == DXB_TEXTURE && !(l->key & 0xFFFFu) && !(l->key & 0x80000000u)) {   /* level 0: content hash */
             uint32_t base = w->tsh ? w->tsh[0].guest : l->guest, sz = w->tsh ? w->tsh[0].size : l->size;
             uint32_t h = 2166136261u, n = sz < 4096 ? sz : 4096;                  /* (analysis: USF_HIDE_TEX*) */

@@ -323,6 +323,8 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
         if (slot == 28 || slot == 29)
             fprintf(stderr, "dxb %s %ux%u fmt %u ms %u q %u\n", slot == 28 ? "rt surface" : "depth surface", ARG(1), ARG(2), ARG(3), ARG(4), ARG(5));
     }
+    uint32_t bcf = w->type == DXB_DEVICE ? dxe_create(slot, x) : 0;   /* DXT made as RGBA8 (dxvk_bcemu.c) */
+    if (w->type == DXB_D3D9 && slot == 10 && dxe_on() && dxe_block(ARG(6)) && !(ARG(4) & 3u)) return 0;   /* DXT: yes */
     if (w->type == DXB_DEVICE && slot >= 81 && slot <= 84) g_dev.draws++;
     if (w->type == DXB_DEVICE && slot >= 30 && slot <= 35) gpu_epoch++;   /* the GPU may write a texture level */
     if (w->type == DXB_D3D9 && slot == 5 && getenv("USF_DXB_IDLOG")) {   /* (analysis) the adapter's GUID */
@@ -346,9 +348,14 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     }
     for (int k = 0; k < nout; k++)
         if (out_at[k]) W32(out_at[k], outs[k] ? dxb_wrap(outs[k], out_type(out_kind[k], outs[k])) : 0);
+    if (bcf && nout && outs[0] && out_at[0]) { Wrap *t = dxb_of(R32(out_at[0])); if (t) t->bcfmt = bcf; }
+    if (w->bcfmt && (int32_t)r >= 0) {                    /* the game sees the DXT format it asked for */
+        if ((w->type == DXB_TEXTURE || w->type == DXB_CUBE) && slot == 17 && ARG(2)) W32(ARG(2), w->bcfmt);
+        if (w->type == DXB_SURFACE && slot == 12 && ARG(1)) W32(ARG(1), w->bcfmt);
+    }
     if ((w->type == DXB_TEXTURE || w->type == DXB_CUBE || w->type == DXB_VOLTEX) && slot == 18 && nout && outs[0]) {
         Wrap *sw = dxb_of(R32(out_at[0]));                    /* a level's surface / volume: remember the texture */
-        if (sw) { sw->parent = ARG(0); sw->plevel = w->type == DXB_CUBE ? ARG(1) << 8 | ARG(2) : ARG(1); }
+        if (sw) { sw->parent = ARG(0); sw->plevel = w->type == DXB_CUBE ? ARG(1) << 8 | ARG(2) : ARG(1); sw->bcfmt = w->bcfmt; }
     }
     if (w->type == DXB_DEVICE && (slot == 106 || slot == 91) && nout && outs[0] && ARG(1)) {   /* shader: its hash */
         uint32_t h = 2166136261u, p = ARG(1);
@@ -501,6 +508,7 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
         if (slot == 19) {
             uint32_t desc[8];
             CALL(n, 17, level, (uint64_t)(uintptr_t)desc, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            if (w->bcfmt) desc[0] = w->bcfmt;
             return dxl_lock_rect(w, 19, face, level, ARG(cube ? 3 : 2), ARG(cube ? 4 : 3), ARG(cube ? 5 : 4), desc, face << 8 | level);
         }
         if (slot == 20) return dxl_unlock(w, 20, face << 8 | level, cube ? face : level, cube ? level : 0);
@@ -525,6 +533,7 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
             if (slot == 13) {
                 uint32_t desc[8];
                 CALL(n, 12, (uint64_t)(uintptr_t)desc, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                if (w->bcfmt) desc[0] = w->bcfmt;
                 if (dxl_lock_readback(w, ARG(1), ARG(2), ARG(3), desc)) return 0;
                 return dxl_lock_rect(w, 13, 0, 0, ARG(1), ARG(2), ARG(3), desc, 0);
             }
@@ -570,5 +579,6 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
 uint32_t dxb_create9(uint32_t sdk);
 uint32_t dxb_create9(uint32_t sdk) {
     void *d = nat_create9 ? nat_create9(sdk) : NULL;
+    if (d) dxe_probe(d);                                 /* DXT on this GPU? (dxvk_bcemu.c) */
     return d ? dxb_wrap(d, DXB_D3D9) : 0;
 }

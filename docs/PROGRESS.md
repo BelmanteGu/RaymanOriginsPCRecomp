@@ -378,3 +378,18 @@ game is extracted, made light, and the extracted files removed.
 - [LIGHT_COPY.md](LIGHT_COPY.md): the step by step of the light copy, on the phone (by the launcher, keeping it as a
   .zip) and on the PC: `tools/lite/make_light.sh <Steam folder>` builds the tools, makes the copy, checks it and
   zips it for the phone's import.
+
+## 2026-11-22 — Phones without DXT textures (Redmi 10C, Adreno 610)
+
+![The Redmi 10C in the game's Options](media/m14-redmi-no-bc.jpg)
+
+The game crashed at once on a Redmi 10C: its GPU (Adreno 610) has no BC formats in Vulkan, so DXVK could not make
+the game's first DXT1 texture (`D3DXCreateTexture ... format DXT1 -> D3DERR_OUTOFVIDEOMEMORY`) and the game wrote
+into the texture it did not get. `runtime/src/d3d9/dxvk_bcemu.c`: when DXVK's `CheckDeviceFormat` says no DXT1 (or
+`USF_BC_EMU=1`), DXT textures and surfaces are made as A8B8G8R8; the game still sees DXT (level descriptions, its
+lock pitch and guest copy, `CheckDeviceFormat`), and each Unlock decodes the locked blocks into DXVK's level with the
+old renderer's decoder (`vk/vk_bcdec.c`); DDS files likewise. Checked on the PC with `USF_BC_EMU=1` (the title the
+same as with BC) and on the Redmi (menus, ~15-18 fps). GPUs with BC (S23, A56, the PC) are unchanged.
+
+Found on the way: on the PC, a light copy given by a relative path is not found (the game falls back to loose
+files and crashes); an absolute path works (the Android app always gives one). Not fixed yet.

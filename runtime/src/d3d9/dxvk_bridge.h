@@ -17,7 +17,10 @@
 enum { DXB_D3D9 = 1, DXB_DEVICE, DXB_TEXTURE, DXB_CUBE, DXB_VOLTEX, DXB_SURFACE, DXB_VOLUME, DXB_VB, DXB_IB, DXB_VS,
        DXB_PS, DXB_DECL, DXB_QUERY, DXB_STATEBLOCK, DXB_SWAPCHAIN, DXB_NTYPES };
 
-typedef struct Lock { uint32_t key, guest, size; void *host; struct Lock *next; } Lock;   /* one open lock */
+typedef struct Lock {                                      /* one open lock */
+    uint32_t key, guest, size; void *host; struct Lock *next;
+    uint32_t bc, gp, np, w, h;                             /* an emulated DXT level (dxvk_bcemu.c): how to decode it */
+} Lock;
 typedef struct { uint32_t guest, size, epoch; } TexShadow;   /* a texture level's guest copy */
 typedef struct {
     void *nat;                 /* DXVK's object */
@@ -39,6 +42,7 @@ typedef struct {
     int rb_open, rb_off;       /* a readback lock is open (no DXVK lock to undo); -1: readback not possible */
     uint32_t code_hash;        /* shaders: FNV-1a of the bytecode; textures: of level 0's first 4 KB (analysis) */
     uint32_t parent, plevel;   /* surfaces from GetSurfaceLevel: the texture and the level (analysis) */
+    uint32_t bcfmt;            /* a DXT texture / surface made as RGBA8 on a GPU without BC (dxvk_bcemu.c): its format */
     Lock *locks;
 } Wrap;
 
@@ -60,6 +64,13 @@ static inline DxbFn dxb_method(void *nat, int slot) { return ((DxbFn *)*(void **
 
 uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, uint32_t levels, uint32_t usage,
                           uint32_t pool, uint32_t info, uint32_t out, int kind);   /* dxvk_d3dx.c */
+
+/* dxvk_bcemu.c: DXT textures on GPUs without BC formats */
+void dxe_probe(void *d3d9);
+int dxe_on(void);
+int dxe_block(uint32_t f);
+uint32_t dxe_create(int slot, uint64_t *x);
+void dxe_decode(uint32_t fmt, const uint8_t *src, uint32_t gp, uint32_t rows, uint8_t *dst, uint32_t np, uint32_t w, uint32_t h);
 
 /* bridge internals shared by dxvk_bridge.c and dxvk_locks.c (locks, buffer rings, draw-time copies) */
 int dxl_block_format(uint32_t f);
