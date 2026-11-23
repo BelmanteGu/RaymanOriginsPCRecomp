@@ -226,7 +226,7 @@ final class GameMenu extends View {
             float h = a < 0.5f ? 80 : 48;
             if (fade > 0.5f) hit(700, y - h, 1700, y + h, () -> { if (item == sel) choose(); else sel = item; });
         }
-        art.text(c, "Port 0.1 - 1.0.32504", 0.41f, WHITE, 2010, 974, SHADOW);
+        art.text(c, "Port 1.0 - 1.0.32504", 0.41f, WHITE, 2010, 974, SHADOW);
         if (!status.isEmpty()) art.text(c, t(status), 0.42f, ORANGE, 1170, 1020, SHADOW);
     }
     private void choose() {

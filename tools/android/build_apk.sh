@@ -40,7 +40,7 @@ cp -r android/res/* $W/res/
 
 $BT/aapt2 compile --dir $W/res -o $W/compiled/res.zip
 $BT/aapt2 link -o $W/base.apk -I $JAR --manifest android/AndroidManifest.xml --java $W/gen \
-  --min-sdk-version 29 --target-sdk-version 34 --version-code 1 --version-name 0.1 ${USF_DEBUGGABLE:+--debug-mode} $W/compiled/res.zip
+  --min-sdk-version 29 --target-sdk-version 34 --version-code 2 --version-name 1.0 ${USF_DEBUGGABLE:+--debug-mode} $W/compiled/res.zip
 
 find android/java $SDL3_SRC/android-project/app/src/main/java/org/libsdl $W/gen -name '*.java' > $W/sources.txt
 $JDK/bin/javac -nowarn --release 17 -classpath $JAR -d $W/classes @$W/sources.txt 2>&1 | grep -v "^Note:" || true
