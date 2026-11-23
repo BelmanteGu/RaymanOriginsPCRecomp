@@ -57,7 +57,7 @@ public class LauncherActivity extends Activity {
             try {
                 g = new GameMenu(this, MenuArt.load(this), new GameMenu.Host() {
                     public boolean hasGame() { return isGame(gameDir()); }
-                    public void pickFolder() { LauncherActivity.this.pickFolder(); }
+                    public void pickFolder() { LauncherActivity.this.pickFiles(); }
                     public void play() { LauncherActivity.this.play(); }
                     public void quit() { finishAndRemoveTask(); }
                     public File dataDir() { return LauncherActivity.this.dataDir(); }
@@ -228,6 +228,16 @@ public class LauncherActivity extends Activity {
         startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), REQ_FOLDER);
     }
 
+    /** the game's look: a folder (read in place, then made light) or a .zip (of the game or of the light copy) */
+    private void pickFiles() {
+        if (game == null) { pickFolder(); return; }
+        String[] ways = {game.text("Game folder"), game.text(".zip file")};
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(game.text("Game files"))
+                .setItems(ways, (d, w) -> { if (w == 0) pickFolder(); else pickZip(); })
+                .show();
+    }
+
     private void pickZip() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -258,6 +268,8 @@ public class LauncherActivity extends Activity {
             String path = treeToPath(data.getData());
             if (isGame(path)) { prefs().edit().putString("game", path).apply(); status.setText(""); selected = 0; showMenu(); }
             else status.setText("Rayman Origins.exe is not in " + path + ". Select the game's own folder.");
+        } else if (req == REQ_ZIP && game != null) {
+            importZipGame(data.getData());
         } else if (req == REQ_ZIP) {
             importZip(data.getData());
         }
@@ -280,6 +292,38 @@ public class LauncherActivity extends Activity {
                 else status.setText(err != null ? err : "Rayman Origins.exe was not found in the .zip.");
                 selected = 0;
                 showMenu();
+            });
+        }).start();
+    }
+
+    /** A .zip in the game's look: extracted into the app's folder; the light copy's own .zip becomes the game as it is
+     *  (game_lite), a .zip of the whole game is made light afterwards (and its extracted files removed). */
+    private void importZipGame(Uri zip) {
+        if (making) return;
+        making = true;
+        File tmp = new File(getExternalFilesDir(null), "game_import"), lite = new File(getExternalFilesDir(null), "game_lite");
+        String label = game.text("Importing the .zip");
+        game.showBusy(label);
+        new Thread(() -> {
+            Packer.deleteAll(tmp);
+            String err = ZipImport.extract(this, zip, tmp, (done, total, name) ->
+                    runOnUiThread(() -> game.showBusy(label + (total > 0 ? "  " + done * 100 / total + "%" : ""))));
+            String root = err == null ? ZipImport.gameRoot(tmp) : null;
+            if (err == null && root == null) err = "Rayman Origins.exe was not found in the .zip.";
+            boolean light = root != null && Packer.isLight(root);
+            if (light) {                                  /* the light copy: it replaces the one there was */
+                Packer.deleteAll(lite);
+                if (!new File(root).renameTo(lite)) err = "Could not move the imported files.";
+                Packer.deleteAll(tmp);
+            } else if (err != null) Packer.deleteAll(tmp);
+            final String e = err;
+            runOnUiThread(() -> {
+                making = false;
+                game.showBusy(null);
+                if (e != null) { android.widget.Toast.makeText(this, e, android.widget.Toast.LENGTH_LONG).show(); game.gameChosen(isGame(gameDir())); return; }
+                prefs().edit().putString("game", light ? lite.getPath() : root).apply();
+                if (light) game.gameChosen(true);
+                else makeLight(() -> { if (Packer.isLight(gameDir())) Packer.deleteAll(tmp); game.gameChosen(isGame(gameDir())); });
             });
         }).start();
     }

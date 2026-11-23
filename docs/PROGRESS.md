@@ -364,3 +364,9 @@ uncompressed files; and 268 MB of Bink movies, 162 MB of them the attract-mode r
   more, but the game wants zlib: they would have to be re-deflated at every load, slower levels on a phone).
 
 Total on the phone: 473 MB archive + 106 MB movies + 8 MB program ≈ **0.59 GB** instead of 2.37 GB.
+
+On the S23 the launcher made it in about a minute (6 threads); that copy, pulled back, checks exact (13,447 regions,
+0 wrong). **Import as .zip** in the game-look launcher too: "Game files" (and the title screen) asks for a folder or a
+.zip. A .zip of the light copy (a folder with the program and `GameData/bundle_PC.lite` + movies; stored, ~0.59 GB)
+becomes `game_lite/` as it is, so a player can keep it and reinstall without making it again; a .zip of the whole
+game is extracted, made light, and the extracted files removed.

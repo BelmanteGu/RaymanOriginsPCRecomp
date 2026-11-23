@@ -188,7 +188,7 @@ final class GameMenu extends View {
         art.image(c, art.bgTitle, 0, 0, MenuArt.W, MenuArt.H);
         for (MenuArt.Draw d : art.frame(art.logo, ms)) art.patches(c, d, 0);
         int a = (int) (255 * (0.72 + 0.28 * Math.cos(ms / 1600.0 * 2 * Math.PI)));
-        art.text(c, t("Select your Rayman Origins folder (Steam)"), 0.5f, (a << 24) | (WHITE & 0xFFFFFF), 1170, 858, (a << 24) | (SHADOW & 0xFFFFFF));
+        art.text(c, t("Select your Rayman Origins folder or .zip (Steam)"), 0.5f, (a << 24) | (WHITE & 0xFFFFFF), 1170, 858, (a << 24) | (SHADOW & 0xFFFFFF));
         art.text(c, t("Your own copy is read in place, nothing is downloaded"), 0.3f, 0xFFE8D8C0, 1170, 948, SHADOW);
         if (!status.isEmpty()) art.text(c, status, 0.36f, ORANGE, 1170, 1010, SHADOW);
         hit(0, 0, MenuArt.W, 940, this::titleGo);
