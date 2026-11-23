@@ -21,16 +21,18 @@ Needs NDK r28c, the Android SDK (build-tools 35, platform 35), JDK 17, an SDL3 3
 
 ## On the phone
 
-1. Install the APK.
+1. Install the APK (the [GitHub release](https://github.com/BelmanteGu/RaymanOriginsPCRecomp/releases)).
 2. Copy your Rayman Origins folder (`Rayman Origins.exe` and `GameData/`, 2.4 GB) to the phone, for example to
-   `Games/RaymanOrigins`.
-3. Open **Rayman Origins**, allow file access, **Select game folder** (or import a .zip of it), **Play**.
+   `Games/RaymanOrigins`, or a .zip of it.
+3. Open **Rayman Origins**, allow file access, **Game files** → **Game folder** (or **.zip file**).
+4. The first time, the launcher makes the light copy of the game (0.6 GB, about a minute on the S23; see
+   [LIGHT_COPY.md](LIGHT_COPY.md)), then **Play**. A .zip of the light copy is taken as it is.
 
 The launcher only finds the game. Everything else happens in the game, by touch:
 
 - in play only the on-screen controls show (stick, jump, attack, back, run, pause);
-- **pause** opens the game's own pause menu, with the port's settings under it: controls on/off, size, opacity,
-  60 / 120 fps;
+- **pause** opens the game's own pause menu; the **gear** opens the port's menu over the game (the launcher's
+  Options, the button-layout editor, back to the launcher);
 - the **resolution** is in the game's own Options; on the phone its list is the screen's shape at its full height and
   at 900, 720 and 540 lines (720 by default).
 

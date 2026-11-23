@@ -36,8 +36,10 @@ This one starts from the **PC build** because that is the copy people can still 
 | ✅ **Sound and movies** | XAudio2 (PCM, MS ADPCM); Bink movies through FFmpeg, with their soundtrack |
 | ✅ **Touch** | on-screen controls and the port's settings drawn in the game (under the game's pause menu) |
 | ✅ **Android** | runs on the Galaxy S23 (arm64, DXVK for Vulkan 1.1), touch controls with the Xbox 360 port's drawings |
+| ✅ **Light copy** | the game in 0.6 GB instead of 2.4 GB (sounds as Opus, the rest byte for byte): [docs/LIGHT_COPY.md](docs/LIGHT_COPY.md) |
 | ✅ **Controllers** | any SDL gamepad (USB / Bluetooth) as an XInput pad, plugged before or after start |
 
+Download (Android): [release 1.0](https://github.com/BelmanteGu/RaymanOriginsPCRecomp/releases/tag/v1.0) ·
 Log: [docs/PROGRESS.md](docs/PROGRESS.md) · Android: [docs/ANDROID.md](docs/ANDROID.md) · plan:
 [docs/PLAN.md](docs/PLAN.md) · rules: [docs/RULES.md](docs/RULES.md)
 

@@ -370,3 +370,11 @@ On the S23 the launcher made it in about a minute (6 threads); that copy, pulled
 .zip. A .zip of the light copy (a folder with the program and `GameData/bundle_PC.lite` + movies; stored, ~0.59 GB)
 becomes `game_lite/` as it is, so a player can keep it and reinstall without making it again; a .zip of the whole
 game is extracted, made light, and the extracted files removed.
+
+## 2026-11-22 — Version 1.0, and the light copy's step by step
+
+- Release **1.0** on GitHub (the Android APK; private: the APK carries the menu's art and music from the game).
+  Version 1.0 / code 2 in the APK and on the launcher.
+- [LIGHT_COPY.md](LIGHT_COPY.md): the step by step of the light copy, on the phone (by the launcher, keeping it as a
+  .zip) and on the PC: `tools/lite/make_light.sh <Steam folder>` builds the tools, makes the copy, checks it and
+  zips it for the phone's import.
