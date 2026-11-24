@@ -419,3 +419,11 @@ Research on other DXVK ports (Skyrim_Android, LMS_Android, spore-re, nfsu2-recom
 dxvk-native 1.9.2b / 1.10.3 for Vulkan 1.1, decode DXT on the CPU, and load Turnip / PanVK drivers through
 adrenotools for old Adreno and Mali; dxvk 1.10.3 waits without spinning and synchronizes only up to the resource's
 last use (a candidate rebase), and has `d3d9.allowDirectBufferMapping` (not in 1.9.2b).
+
+Then, measured on the Redmi again (simpleperf with off-CPU time): the game thread used 12-17 ms of CPU a frame and
+spent the rest blocked in DXVK's Present (`waitForSubmission`), its submit thread in Android's `queueBuffer` (the
+display's 60 Hz); a frame over ~16 ms misses the vsync and the game drops to 30 fps. The touch layer took a tenth of
+the game thread: the buttons were rasterised into a picture of the whole screen (4.7 MB) and uploaded at every
+finger move. Now `dxvk_overlay.c` draws them as textured quads from a 2048x256 atlas of the 8 drawings (with mips,
+made once); the picture is kept for shapes and text only (menu, editor, fps) and is empty in play. Same look
+(compared on the PC with `RAYMAN_TOUCH=1`).

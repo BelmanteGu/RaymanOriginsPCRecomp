@@ -336,8 +336,20 @@ static int glyph(char ch) {
 static uint8_t *pix;
 static int pw, ph;
 static char fps_text[16] = "";
+/* The DXVK layer draws the drawings itself, as textured quads (dxvk_overlay.c): sprite() then only lists them, and
+ * the picture keeps the shapes and text (menu, editor, fps), usually none. Rasterising the buttons into a picture of
+ * the whole screen and uploading it at every finger move cost a tenth of the game thread on a weak phone. */
+typedef struct { int art; float cx, cy, half, a; int bright; } TouchQuad;
+int touch_gpu_sprites;
+static TouchQuad quads[32];
+static int nquads, pix_has;
+const TouchQuad *touch_quads(int *n);
+const TouchQuad *touch_quads(int *n) { *n = nquads; return quads; }
+int touch_picture_has(void);
+int touch_picture_has(void) { return pix_has; }
 static void blend(int x, int y, uint32_t rgb, float a) {
     if (x < 0 || y < 0 || x >= pw || y >= ph || a <= 0) return;
+    pix_has = 1;
     uint8_t *p = pix + 4 * ((size_t)y * pw + x);
     float r = (float)((rgb >> 16) & 255) * a, g = (float)((rgb >> 8) & 255) * a, b = (float)(rgb & 255) * a;
     p[0] = (uint8_t)(r + p[0] * (1 - a)); p[1] = (uint8_t)(g + p[1] * (1 - a)); p[2] = (uint8_t)(b + p[2] * (1 - a));
@@ -348,6 +360,8 @@ static void blend(int x, int y, uint32_t rgb, float a) {
 static void sprite(int art, float cx, float cy, float r, float a, int bright) {
     const uint8_t *src = touch_art + (size_t)art * ART_SIZE * ART_SIZE * 4;
     float half = r / 0.84f, k = (float)ART_SIZE / (2 * half);
+    if (touch_gpu_sprites) { if (nquads < 32) quads[nquads++] = (TouchQuad){art, cx, cy, half, a, bright}; return; }
+    pix_has = 1;
     int x0 = (int)(cx - half), x1 = (int)(cx + half), y0 = (int)(cy - half), y1 = (int)(cy + half);
     for (int y = y0 < 0 ? 0 : y0; y <= y1 && y < ph; y++)
         for (int x = x0 < 0 ? 0 : x0; x <= x1 && x < pw; x++) {
@@ -429,7 +443,9 @@ const uint8_t *touch_picture(int w, int h, int *changed) {
         frames = 0; t_last = now;
     }
     if (!dirty) { pthread_mutex_unlock(&lk); return pix; }
-    memset(pix, 0, (size_t)w * h * 4);
+    if (pix_has) memset(pix, 0, (size_t)w * h * 4);
+    pix_has = 0;
+    nquads = 0;
     float alpha = set.opacity == 0 ? 0.5f : set.opacity == 2 ? 1.0f : 0.75f, s = scale();
     if (menu_open) draw_menu(w, h);
     if (editing) {                                                        /* moving the buttons */
