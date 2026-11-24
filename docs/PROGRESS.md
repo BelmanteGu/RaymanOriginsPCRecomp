@@ -427,3 +427,11 @@ the game thread: the buttons were rasterised into a picture of the whole screen 
 finger move. Now `dxvk_overlay.c` draws them as textured quads from a 2048x256 atlas of the 8 drawings (with mips,
 made once); the picture is kept for shapes and text only (menu, editor, fps) and is empty in play. Same look
 (compared on the PC with `RAYMAN_TOUCH=1`).
+
+**The real cause of the 30 fps on the Redmi:** dxvk-native 1.9.2b reads no `DXVK_CONFIG` variable (only a file:
+`DXVK_CONFIG_FILE` or `./dxvk.conf`), so on Android none of the bridge's DXVK options applied: the game's own vsync
+request won and DXVK recreated the swap chain in FIFO; with its synchronous present, any frame over 16.7 ms waited
+for the next vblank and the game fell to 30 fps (the PC's DXVK 3.1.1 reads the variable: never seen there). The
+bridge now also writes the options to `<data>/dxvk.conf` and points `DXVK_CONFIG_FILE` at it, with
+`d3d9.tearFree = True` (MAILBOX, never IMMEDIATE). Checked on the Redmi: "Found config file", presentInterval 0,
+MAILBOX kept.

@@ -64,6 +64,21 @@ int dxb_enabled(void) {
     snprintf(cfg, sizeof cfg, "d3d9.cachedWriteOnlyBuffers = True; d3d9.presentInterval = %d; d3d9.maxFrameRate = %d",
              getenv("USF_VSYNC") && !getenv("USF_NOVSYNC") ? 1 : 0, fps > 0 ? fps : 0);
     setenv("DXVK_CONFIG", cfg, 0);
+    /* dxvk-native 1.9.2b (Android) reads no DXVK_CONFIG, only a file (DXVK_CONFIG_FILE or ./dxvk.conf): without it
+     * the game's own vsync request won (FIFO), so any frame over 16.7 ms waited for the next vblank (30 fps on a
+     * Redmi 10C). The same options as a file in the data folder; tearFree: MAILBOX, never IMMEDIATE (no tearing). */
+    if (!getenv("DXVK_CONFIG_FILE")) {
+        extern char g_data_dir[1024];
+        static char conf[1100];
+        snprintf(conf, sizeof conf, "%s/dxvk.conf", g_data_dir);
+        FILE *f = fopen(conf, "w");
+        if (f) {
+            for (const char *p = cfg; *p; p++) fputc(*p == ';' ? '\n' : *p, f);
+            fprintf(f, "\nd3d9.tearFree = True\n");
+            fclose(f);
+            setenv("DXVK_CONFIG_FILE", conf, 1);
+        }
+    }
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!h) { fprintf(stderr, "usf: DXVK not loaded (%s): own renderer\n", dlerror()); return 0; }
     nat_create9 = (void *(*)(uint32_t))dlsym(h, "Direct3DCreate9");
