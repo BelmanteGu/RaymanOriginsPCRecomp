@@ -435,3 +435,21 @@ for the next vblank and the game fell to 30 fps (the PC's DXVK 3.1.1 reads the v
 bridge now also writes the options to `<data>/dxvk.conf` and points `DXVK_CONFIG_FILE` at it, with
 `d3d9.tearFree = True` (MAILBOX, never IMMEDIATE). Checked on the Redmi: "Found config file", presentInterval 0,
 MAILBOX kept.
+
+## 2026-11-24 — Turnip and BCeNabler on Android (libadrenotools)
+
+- **GPU driver of the player's**: Game files → GPU driver → System / Turnip. The launcher (GpuDrivers.java) downloads
+  Turnip from GitHub (pinned: StevenMXZ `Turnip_v26.3.0-R6.zip`, Mesa 26.3: before 26.3 Turnip offers only Vulkan 1.0
+  on an Adreno 610, Mesa MR !43117 added the missing multiview) into files/gpu_drivers/turnip/; the runtime
+  (gpu_driver.c) opens it through libadrenotools (tools/android/build_adrenotools.sh; hook libraries beside
+  libmain.so) and gives DXVK its vkGetInstanceProcAddr as `DXVK_VK_GIPA` (tools/android/dxvk_mobile_gipa.patch);
+  the window surface already comes from the instance's own vkCreateAndroidSurfaceKHR. A trial file sends a driver
+  that never draws back to the system's (the MHGU port's scheme).
+- **BCeNabler** (libadrenotools) on the system's Qualcomm driver: drivers 512.x before 514 hide the BC formats the
+  Adreno 6xx has; patched, DXT textures stay compressed (USF_NO_BCN=1 leaves it alone).
+- The "Fullscreen mode not supported" message box no longer stops every start (the game asks for an exclusive mode
+  a phone does not have; DXVK's desktop full screen is what is wanted).
+- Input recording for repeatable tests: `USF_REC=<file>` / `USF_REPLAY=<file>` (player 1 as the game received it).
+- **Redmi 10C with Turnip 26.3** (the user, 2026-11-24): "Turnip Adreno (TM) 610", `textureCompressionBC: 1` (the
+  game's DXT textures as they are), the driver's trial passed; some visual errors of the Qualcomm driver are gone. In
+  a level still 28-37 fps at 1232x540 (CPU 11-15 ms a frame, target 60): GPU-bound, still to be found.

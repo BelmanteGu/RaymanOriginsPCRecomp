@@ -79,6 +79,9 @@ int dxb_enabled(void) {
             setenv("DXVK_CONFIG_FILE", conf, 1);
         }
     }
+#ifdef __ANDROID__
+    { void gpu_driver_prepare(void); gpu_driver_prepare(); }   /* the player's driver / BCeNabler (gpu_driver.c) */
+#endif
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!h) { fprintf(stderr, "usf: DXVK not loaded (%s): own renderer\n", dlerror()); return 0; }
     nat_create9 = (void *(*)(uint32_t))dlsym(h, "Direct3DCreate9");

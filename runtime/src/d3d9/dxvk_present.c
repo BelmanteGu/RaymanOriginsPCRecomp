@@ -36,6 +36,9 @@ static uint32_t ft_late(const float *v, uint32_t n) {    /* frames 25% over the 
 void dxb_after_present(void *dev, void *chain);
 void dxb_after_present(void *dev, void *chain) {   /* chain: an additional swap chain presented, or NULL */
     g_dev.frames++;
+#ifdef __ANDROID__
+    if (g_dev.frames == 300) { void gpu_driver_good(void); gpu_driver_good(); }   /* the driver's trial is over */
+#endif
     static struct timespec t0, c0;
     static uint32_t f0, d0;
     static double worst;

@@ -385,6 +385,9 @@ uint32_t u32_GetRawInputDeviceList(CPU *c, uint32_t a) { (void)c; if (ARG(1)) W3
 
 static uint32_t message_box(const char *text, const char *title) {
     fprintf(stderr, "usf: MessageBox [%s] %s\n", title, text);
+    /* the game asks for an exclusive full-screen mode of its own size; there is none on a phone (or in a window) and
+     * DXVK falls back to desktop full screen, which is what is wanted: the box only stopped every start for a tap */
+    if (strstr(text, "Fullscreen mode not supported")) return 1;
     if (sdl_ready) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, title, text, g_window);
     return 1;                                                  /* IDOK */
 }

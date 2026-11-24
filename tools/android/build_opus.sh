@@ -1,4 +1,4 @@
-#!/bin/sh
+ini#!/bin/sh
 # Builds libopus (BSD licence, xiph.org) for Android arm64 as a static library: private/android/opus/out/{include,lib}.
 # The compressed game archive (runtime/src/lite_*.c) stores the game's sounds as Opus: the launcher encodes them once
 # (libpack.so) and the game decodes them (libmain.so). Run once; tools/android/build_native.sh uses the result.

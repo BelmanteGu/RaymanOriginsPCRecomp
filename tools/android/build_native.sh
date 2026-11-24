@@ -30,8 +30,10 @@ if [ -f $FF/lib/libavcodec.a ]; then FFC="-I$FF/include"; FFL="$FF/lib/libavform
 else FFC="-DUSF_NO_FFMPEG"; FFL=""; fi
 OPUS=private/android/opus/out                 # tools/android/build_opus.sh (the compressed archive's sounds)
 [ -f $OPUS/lib/libopus.a ] || sh tools/android/build_opus.sh
+ADT=private/android/adrenotools               # tools/android/build_adrenotools.sh (Turnip, BCeNabler: runtime/src/gpu_driver.c)
+[ -f $ADT/libadrenotools.a ] || sh tools/android/build_adrenotools.sh
 CFLAGS="-O2 -g -fPIC -Wall -Wno-unused-parameter -ffp-contract=off -fwrapv -fno-strict-aliasing $FFC -I$OPUS/include/opus
-        -Iruntime/include -Iruntime/src -Iprivate/include -I$SDL3_SRC/include -I$NDK/sources/third_party/shaderc/libshaderc/include"
+        -Iruntime/include -Iruntime/src -Iprivate/include -Iprivate/deps/libadrenotools/include -I$SDL3_SRC/include -I$NDK/sources/third_party/shaderc/libshaderc/include"
 [ private/include/touch_art.rgba -nt tools/touch_art.py ] || .venv/bin/python -I tools/touch_art.py   # the touch controls' drawings
 [ private/include/pad_icons.rgba -nt runtime/assets/pad_icons.png ] || .venv/bin/python -I tools/pad_icons_art.py   # the pad button icons
 export CC CFLAGS OBJ                            # four at a time (a light load on the machine)
@@ -51,6 +53,7 @@ usf_callsites_blob_end:
 EOF
 $CC -c $OBJ/callsites_blob.S -o $OBJ/callsites_blob.o
 $CXX -shared -o $OUT/libmain.so $OBJ/*.o private/obj/a64/lifted_[0-9]*.o $SHADERC $FFL $OPUS/lib/libopus.a -lz \
+  $ADT/libadrenotools.a $ADT/lib/linkernsbypass/liblinkernsbypass.a \
   -L$SDL3_ANDROID -lSDL3 -lvulkan -landroid -llog -lm -static-libstdc++ -Wl,--gc-sections -Wl,-z,max-page-size=16384 -Wl,--exclude-libs,ALL
 cp $SDL3_ANDROID/libSDL3.so $OUT/
 # libpack.so: the launcher compresses the player's archive with it (runtime/android/pack_jni.c, runtime/src/lite_make.c)

@@ -231,11 +231,34 @@ public class LauncherActivity extends Activity {
     /** the game's look: a folder (read in place, then made light) or a .zip (of the game or of the light copy) */
     private void pickFiles() {
         if (game == null) { pickFolder(); return; }
-        String[] ways = {game.text("Game folder"), game.text(".zip file")};
+        String[] ways = {game.text("Game folder"), game.text(".zip file"), game.text("GPU driver")};
         new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle(game.text("Game files"))
-                .setItems(ways, (d, w) -> { if (w == 0) pickFolder(); else pickZip(); })
+                .setItems(ways, (d, w) -> { if (w == 0) pickFolder(); else if (w == 1) pickZip(); else pickDriver(); })
                 .show();
+    }
+
+    /** The Vulkan driver (GpuDrivers): the system's, or Turnip downloaded from GitHub (Adreno only). */
+    private void pickDriver() {
+        String sel = GpuDrivers.selected(this), failed = GpuDrivers.failed(this);
+        String[] ways = {(sel == null ? "\u2713 " : "") + game.text("System driver"),
+                         (sel != null ? "\u2713 " : "") + game.text("Turnip (download from GitHub)")};
+        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle(game.text("GPU driver"))
+                .setItems(ways, (d, w) -> {
+                    if (w == 0) { GpuDrivers.useSystem(this); android.widget.Toast.makeText(this, game.text("System driver"), android.widget.Toast.LENGTH_SHORT).show(); return; }
+                    String label = game.text("Downloading the Turnip driver");
+                    game.showBusy(label);
+                    new Thread(() -> {
+                        String err = GpuDrivers.downloadTurnip(this, t -> runOnUiThread(() -> game.showBusy(label + "  " + t)));
+                        runOnUiThread(() -> {
+                            game.showBusy(null);
+                            android.widget.Toast.makeText(this, err != null ? err : game.text("Turnip installed"), android.widget.Toast.LENGTH_LONG).show();
+                        });
+                    }).start();
+                });
+        if (failed != null) b.setMessage(game.text("The last driver did not work; the system driver was used."));
+        b.show();
     }
 
     private void pickZip() {

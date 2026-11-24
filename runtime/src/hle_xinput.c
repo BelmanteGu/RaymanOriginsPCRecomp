@@ -40,6 +40,8 @@ static int16_t axis(SDL_Gamepad *g, SDL_GamepadAxis a, int invert) {
 /* USF_INPUT="600-610:S;700-705:A;..." presses buttons on pad 0 during frame ranges (unattended tests).
  * Letters: U D L R (d-pad), S start, K back, A B X Y, 1 = LB, 2 = RB, 3 = LT, 4 = RT. */
 #include <pthread.h>
+#include <stddef.h>
+#include <string.h>
 #include "d3d9/d3d9.h"
 static uint16_t scripted(uint8_t *lt, uint8_t *rt);
 uint16_t touch_buttons(void);                                  /* the on-screen controls (touch.c) */
@@ -86,6 +88,56 @@ static uint16_t scripted(uint8_t *lt, uint8_t *rt) {
             if (presses[i].rt) *rt = 255;
         }
     return b;
+}
+
+/* Player 1 as the game received it (touch, pad, keyboard), for repeatable tests on a phone:
+ * USF_REC=<file> writes "frame buttons lt rt lx ly rx ry" each time it changes; USF_REPLAY=<file> plays such a file
+ * back (the live input is ignored), by frame number (presented frames since start). */
+typedef struct { uint32_t f; uint16_t b; uint8_t lt, rt; int16_t lx, ly, rx, ry; } PadRec;
+static void recorded(uint16_t *b, uint8_t *lt, uint8_t *rt, int16_t *lx, int16_t *ly, int16_t *rx, int16_t *ry) {
+    static int mode = -1;                                       /* 0 off, 1 record, 2 replay */
+    static FILE *rec;
+    static PadRec last, *play;
+    static int n_play, at;
+    static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&m);
+    if (mode < 0) {
+        const char *r = getenv("USF_REC"), *p = getenv("USF_REPLAY");
+        mode = 0;
+        if (p) {
+            FILE *f = fopen(p, "r");
+            PadRec e;
+            unsigned bb, l, rr;
+            int cap = 0;
+            while (f && fscanf(f, "%u %x %u %u %hd %hd %hd %hd", &e.f, &bb, &l, &rr, &e.lx, &e.ly, &e.rx, &e.ry) == 8) {
+                e.b = (uint16_t)bb; e.lt = (uint8_t)l; e.rt = (uint8_t)rr;
+                if (n_play == cap) { cap = cap ? cap * 2 : 1024; play = realloc(play, (size_t)cap * sizeof *play); }
+                play[n_play++] = e;
+            }
+            if (f) fclose(f);
+            fprintf(stderr, "usf: replaying %d input changes from %s\n", n_play, p);
+            mode = 2;
+        } else if (r && (rec = fopen(r, "w"))) {
+            fprintf(stderr, "usf: recording player 1's input to %s\n", r);
+            mode = 1;
+            last.f = 0xFFFFFFFFu;
+        }
+    }
+    if (mode == 1) {
+        PadRec e = {g_dev.frames, *b, *lt, *rt, *lx, *ly, *rx, *ry};
+        if (last.f == 0xFFFFFFFFu || memcmp(&e.b, &last.b, sizeof e - offsetof(PadRec, b))) {
+            fprintf(rec, "%u %04x %u %u %d %d %d %d\n", e.f, e.b, e.lt, e.rt, e.lx, e.ly, e.rx, e.ry);
+            fflush(rec);
+            last = e;
+        }
+    } else if (mode == 2) {
+        while (at + 1 < n_play && play[at + 1].f <= g_dev.frames) at++;
+        if (n_play && play[at].f <= g_dev.frames) {
+            *b = play[at].b; *lt = play[at].lt; *rt = play[at].rt;
+            *lx = play[at].lx; *ly = play[at].ly; *rx = play[at].rx; *ry = play[at].ry;
+        } else { *b = 0; *lt = *rt = 0; *lx = *ly = *rx = *ry = 0; }
+    }
+    pthread_mutex_unlock(&m);
 }
 
 uint32_t x_XInputGetState(CPU *c, uint32_t a) {
@@ -138,6 +190,7 @@ uint32_t x_XInputGetState(CPU *c, uint32_t a) {
             ly = (t & 0x0001) ? 32767 : (t & 0x0002) ? -32768 : 0;
         }
     }
+    if (idx == 0) recorded(&b, &lt, &rt, &lx, &ly, &rx, &ry);   /* USF_REC / USF_REPLAY */
     if (getenv("USF_PADLOG") && idx == 0) {                     /* debug: player 1's state when it changes */
         static uint16_t lb = 0xFFFF;
         if (b != lb) fprintf(stderr, "pad: XInputGetState(0) sdl=%p buttons %04x lx %d ly %d\n", (void *)g, b, lx, ly);

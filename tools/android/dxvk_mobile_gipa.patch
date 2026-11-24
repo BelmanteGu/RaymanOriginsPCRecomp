@@ -1,0 +1,27 @@
+--- a/src/vulkan/vulkan_loader.cpp	2026-11-24 07:49:23.499810679 -0400
++++ b/src/vulkan/vulkan_loader.cpp	2026-11-24 07:49:23.508153233 -0400
+@@ -1,8 +1,23 @@
+ #include "vulkan_loader.h"
+ 
++#include <cstdlib>
++
+ namespace dxvk::vk {
+ 
+-  static const PFN_vkGetInstanceProcAddr GetInstanceProcAddr = vkGetInstanceProcAddr;
++  // The app may give its own vkGetInstanceProcAddr (Rayman Origins PC port: a Vulkan driver of the player's, Turnip,
++  // opened through libadrenotools) as DXVK_VK_GIPA=<hex address>; otherwise the system's libvulkan.so.
++  static PFN_vkGetInstanceProcAddr GetInstanceProcAddrFn() {
++    static const PFN_vkGetInstanceProcAddr fn = [] {
++      const char* e = std::getenv("DXVK_VK_GIPA");
++      if (e && *e) {
++        auto p = reinterpret_cast<PFN_vkGetInstanceProcAddr>(std::strtoull(e, nullptr, 16));
++        if (p) return p;
++      }
++      return static_cast<PFN_vkGetInstanceProcAddr>(vkGetInstanceProcAddr);
++    }();
++    return fn;
++  }
++#define GetInstanceProcAddr GetInstanceProcAddrFn()
+ 
+   PFN_vkVoidFunction LibraryLoader::sym(const char* name) const {
+     return dxvk::vk::GetInstanceProcAddr(nullptr, name);
