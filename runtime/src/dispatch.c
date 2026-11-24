@@ -78,18 +78,29 @@ int usf_thunk_call(CPU *c, uint32_t target) {
     return 1;
 }
 
-static void (*find(const USFEntry *t, unsigned n, uint32_t a))(CPU *) {
-    unsigned lo = 0, hi = n;
+/* the entry for guest address a (binary search), or -1 */
+static long find(uint32_t a) {
+    unsigned lo = 0, hi = usf_table_count;
     while (lo < hi) {
         unsigned mid = (lo + hi) / 2;
-        if (t[mid].addr < a) lo = mid + 1; else hi = mid;
+        if (usf_table[mid].addr < a) lo = mid + 1; else hi = mid;
     }
-    return lo < n && t[lo].addr == a ? t[lo].fn : NULL;
+    return lo < usf_table_count && usf_table[lo].addr == a ? (long)lo : -1;
 }
 
+/* A direct-mapped cache in front of the binary search (16 scattered reads over 45,000 entries at every virtual call:
+ * a tenth of the game thread, worse on a phone's small caches): one 64-bit word per slot, the guest address above
+ * and the table index below, read and written whole, so threads need no lock. */
+#define ICACHE_BITS 16
+static uint64_t icache[1u << ICACHE_BITS];
 static void (*lookup(uint32_t a))(CPU *) {
-    void (*fn)(CPU *) = find(usf_table, usf_table_count, a);
-    return fn;
+    uint32_t h = (a * 2654435761u) >> (32 - ICACHE_BITS);
+    uint64_t v = __atomic_load_n(&icache[h], __ATOMIC_RELAXED);
+    if (v && (uint32_t)(v >> 32) == a) return usf_table[(uint32_t)v].fn;
+    long i = find(a);
+    if (i < 0) return NULL;
+    __atomic_store_n(&icache[h], (uint64_t)a << 32 | (uint32_t)i, __ATOMIC_RELAXED);
+    return usf_table[i].fn;
 }
 
 void usf_icall(CPU *c, uint32_t target) {

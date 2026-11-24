@@ -219,7 +219,20 @@ static int hide_match(const char *list, const char *key) {
     }
     return 0;
 }
+/* the analysis switches, read once (they were read on every call: a fifth of the game thread on a phone) */
+static struct { int init, hide_ps, hide_tex, geo, rtlog, idlog, faillog, pslog; } dsw;
+static void switches(void) {
+    dsw.hide_ps = getenv("USF_HIDE_PS") != NULL;
+    dsw.hide_tex = getenv("USF_HIDE_TEX") || getenv("USF_HIDE_TEX_ODD");
+    dsw.geo = getenv("USF_GEO_DUMP") != NULL;
+    dsw.rtlog = getenv("USF_DXB_RTLOG") != NULL;
+    dsw.idlog = getenv("USF_DXB_IDLOG") != NULL;
+    dsw.faillog = getenv("USF_DXB_FAILLOG") != NULL;
+    dsw.pslog = getenv("USF_PS_LOG") != NULL;
+    dsw.init = 1;
+}
 static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
+    if (!dsw.init) switches();
     Wrap *w = dxb_of(ARG(0));
     if (!w) {
         static int n;
@@ -252,13 +265,13 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
             break;
         }
     }
-    if (w->type == DXB_DEVICE && (slot == 107 || (slot >= 81 && slot <= 84)) && getenv("USF_HIDE_PS")) {
+    if (w->type == DXB_DEVICE && (slot == 107 || (slot >= 81 && slot <= 84)) && dsw.hide_ps) {
         /* (analysis) USF_HIDE_PS=<hash>,...: draws with one of these pixel shaders are skipped (USF_PS_LOG lists them) */
         static uint32_t ps;
         if (slot == 107) ps = ARG(1);
         else { Wrap *p = dxb_of(ps); char key[16]; if (p) { snprintf(key, sizeof key, "%08x", p->code_hash); if (strstr(getenv("USF_HIDE_PS"), key)) return 0; } }
     }
-    if (w->type == DXB_DEVICE && (slot == 65 || (slot >= 81 && slot <= 84)) && (getenv("USF_HIDE_TEX") || getenv("USF_HIDE_TEX_ODD"))) {
+    if (w->type == DXB_DEVICE && (slot == 65 || (slot >= 81 && slot <= 84)) && dsw.hide_tex) {
         /* (analysis) USF_HIDE_TEX=<w>x<h>x<format hex>,...: draws whose stage-0 texture is one of these are skipped
          * (e.g. the menu's UI atlases, to capture the scene behind it) */
         static uint32_t tex0;
@@ -279,7 +292,7 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
             if ((g_dev.frames & 1) && hide_match(odd, key)) return 0;
         }
     }
-    if (w->type == DXB_DEVICE && getenv("USF_GEO_DUMP")) {    /* (analysis) dxvk_geodump.c */
+    if (w->type == DXB_DEVICE && dsw.geo) {    /* (analysis) dxvk_geodump.c */
         static uint32_t gtex;
         void dxb_geo_consts(uint32_t start, uint32_t data, uint32_t count);
         void dxb_geo_draw(int indexed, uint32_t type, int32_t base, uint32_t first, uint32_t nverts, uint32_t start_index,
@@ -307,7 +320,7 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     case 82: dxl_flush_draw(1, ARG(1), (int32_t)ARG(2), ARG(3), ARG(4), ARG(5), ARG(6)); break;
     case 85: for (int k = 0; k < 16; k++) { Wrap *v = dxb_of(stream_buf[k]); if (v) dxl_flush_range(v, 0, v->shadow_size); } break;
     }
-    if (w->type == DXB_DEVICE && getenv("USF_DXB_RTLOG")) {   /* (analysis) render targets the game makes */
+    if (w->type == DXB_DEVICE && dsw.rtlog) {   /* (analysis) render targets the game makes */
         if (slot == 23 && (ARG(4) & 3u))
             fprintf(stderr, "dxb rt texture %ux%u levels %u usage %x fmt %u pool %u\n", ARG(1), ARG(2), ARG(3), ARG(4), ARG(5), ARG(6));
         if (slot == 25 && (ARG(3) & 3u))
@@ -327,7 +340,7 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     if (w->type == DXB_D3D9 && slot == 10 && dxe_on() && dxe_block(ARG(6)) && !(ARG(4) & 3u)) return 0;   /* DXT: yes */
     if (w->type == DXB_DEVICE && slot >= 81 && slot <= 84) g_dev.draws++;
     if (w->type == DXB_DEVICE && slot >= 30 && slot <= 35) gpu_epoch++;   /* the GPU may write a texture level */
-    if (w->type == DXB_D3D9 && slot == 5 && getenv("USF_DXB_IDLOG")) {   /* (analysis) the adapter's GUID */
+    if (w->type == DXB_D3D9 && slot == 5 && dsw.idlog) {   /* (analysis) the adapter's GUID */
         uint32_t r5 = (uint32_t)dxb_method(w->nat, 5)(w->nat, x[0], x[1], x[2], 0, 0, 0, 0, 0, 0, 0, 0);
         uint32_t g = ARG(3) + 1056 + 8 + 4 * 4;                /* after Driver, Description, DeviceName, version, ids */
         fprintf(stderr, "dxb adapter %u '%s' guid %08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x\n", ARG(1),
@@ -337,7 +350,7 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     }
     uint32_t r = (uint32_t)dxb_method(w->nat, slot)(w->nat, x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8],
                                                     x[9], x[10]);
-    if (w->type == DXB_DEVICE && (int32_t)r < 0 && getenv("USF_DXB_FAILLOG")) {   /* (analysis) failed calls */
+    if (w->type == DXB_DEVICE && (int32_t)r < 0 && dsw.faillog) {   /* (analysis) failed calls */
         static int nfail;
         if (nfail++ < 40) {
             fprintf(stderr, "dxb device slot %d failed %08x args", slot, r);
@@ -366,7 +379,7 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
         }
         Wrap *sw = dxb_of(R32(out_at[0]));
         if (sw) sw->code_hash = h;
-        if (getenv("USF_PS_LOG") && slot == 106) fprintf(stderr, "usf: pixel shader %08x (frame %u)\n", h, g_dev.frames);
+        if (dsw.pslog && slot == 106) fprintf(stderr, "usf: pixel shader %08x (frame %u)\n", h, g_dev.frames);
     }
     return r;
 }

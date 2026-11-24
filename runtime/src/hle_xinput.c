@@ -39,30 +39,52 @@ static int16_t axis(SDL_Gamepad *g, SDL_GamepadAxis a, int invert) {
 
 /* USF_INPUT="600-610:S;700-705:A;..." presses buttons on pad 0 during frame ranges (unattended tests).
  * Letters: U D L R (d-pad), S start, K back, A B X Y, 1 = LB, 2 = RB, 3 = LT, 4 = RT. */
+#include <pthread.h>
 #include "d3d9/d3d9.h"
 static uint16_t scripted(uint8_t *lt, uint8_t *rt);
 uint16_t touch_buttons(void);                                  /* the on-screen controls (touch.c) */
 uint16_t usf_scripted_buttons(void) { uint8_t l = 0, r = 0; return scripted(&l, &r); }   /* touch: only through XInput, as a pad */
-static uint16_t scripted(uint8_t *lt, uint8_t *rt) {
+/* the script, read once (parsed at every pad read it cost the tests most of the game thread) */
+typedef struct { uint32_t f1, f2; uint16_t b; uint8_t lt, rt; } Press;
+static Press *presses;
+static int n_presses = -1;
+static pthread_mutex_t script_m = PTHREAD_MUTEX_INITIALIZER;
+static void parse_script(void) {
     const char *sc = getenv("USF_INPUT");
-    if (!sc) return 0;
-    uint16_t b = 0;
-    for (const char *p = sc; *p;) {
+    int cap = 0, n = 0;
+    Press *v = NULL;
+    for (const char *p = sc; p && *p;) {
         unsigned f1 = 0, f2 = 0;
         char keys[32] = {0};
-        if (sscanf(p, "%u-%u:%31[^;]", &f1, &f2, keys) == 3 && g_dev.frames >= f1 && g_dev.frames <= f2)
+        if (sscanf(p, "%u-%u:%31[^;]", &f1, &f2, keys) == 3) {
+            Press e = {f1, f2, 0, 0, 0};
             for (char *k = keys; *k; k++)
                 switch (*k) {
-                case 'U': b |= 0x0001; break; case 'D': b |= 0x0002; break; case 'L': b |= 0x0004; break;
-                case 'R': b |= 0x0008; break; case 'S': b |= 0x0010; break; case 'K': b |= 0x0020; break;
-                case 'A': b |= 0x1000; break; case 'B': b |= 0x2000; break; case 'X': b |= 0x4000; break;
-                case 'Y': b |= 0x8000; break; case '1': b |= 0x0100; break; case '2': b |= 0x0200; break;
-                case '3': *lt = 255; break; case '4': *rt = 255; break;
+                case 'U': e.b |= 0x0001; break; case 'D': e.b |= 0x0002; break; case 'L': e.b |= 0x0004; break;
+                case 'R': e.b |= 0x0008; break; case 'S': e.b |= 0x0010; break; case 'K': e.b |= 0x0020; break;
+                case 'A': e.b |= 0x1000; break; case 'B': e.b |= 0x2000; break; case 'X': e.b |= 0x4000; break;
+                case 'Y': e.b |= 0x8000; break; case '1': e.b |= 0x0100; break; case '2': e.b |= 0x0200; break;
+                case '3': e.lt = 255; break; case '4': e.rt = 255; break;
                 }
+            if (n == cap) { cap = cap ? cap * 2 : 64; v = realloc(v, (size_t)cap * sizeof *v); }
+            v[n++] = e;
+        }
         p = strchr(p, ';');
         if (!p) break;
         p++;
     }
+    presses = v;
+    n_presses = n;
+}
+static uint16_t scripted(uint8_t *lt, uint8_t *rt) {
+    if (n_presses < 0) { pthread_mutex_lock(&script_m); if (n_presses < 0) parse_script(); pthread_mutex_unlock(&script_m); }
+    uint16_t b = 0;
+    for (int i = 0; i < n_presses; i++)
+        if (g_dev.frames >= presses[i].f1 && g_dev.frames <= presses[i].f2) {
+            b |= presses[i].b;
+            if (presses[i].lt) *lt = 255;
+            if (presses[i].rt) *rt = 255;
+        }
     return b;
 }
 

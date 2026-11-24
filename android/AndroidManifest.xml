@@ -26,6 +26,8 @@
         android:extractNativeLibs="true"
         android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.Rayman">
+        <!-- simpleperf over adb (performance on phones); nothing else changes -->
+        <profileable android:shell="true" />
 
         <activity
             android:name=".LauncherActivity"

@@ -393,3 +393,29 @@ same as with BC) and on the Redmi (menus, ~15-18 fps). GPUs with BC (S23, A56, t
 
 Found on the way: on the PC, a light copy given by a relative path is not found (the game falls back to loose
 files and crashes); an absolute path works (the Android app always gives one). Not fixed yet.
+
+## 2026-11-23 — Weak phones: the waits and the CPU (Redmi 10C, Adreno 610)
+
+The Redmi 10C ran the menus at ~30 fps. Measured on the phone with simpleperf (the app is now `profileable` for
+the shell) and on the PC with a new sampler (`USF_PROF=<s>`, `USF_PROF_WAIT=<s>`, runtime/src/prof.c):
+
+- **A third of the game thread waited for the GPU** (`D3D9DeviceEx::WaitForResource`, spinning on `sched_yield`).
+  `USF_LOCKSTATS=1` (each lock tried first with DONOTWAIT) found them: the sprite batches' small vertex buffers
+  (96 B - 3 KB, DYNAMIC | WRITEONLY, default pool) locked with no flags, hundreds of times a second. dxvk-native
+  1.9.2b maps such buffers directly, so a lock without DISCARD waits for the GPU; the PC's GPU is always done by then,
+  the Adreno 610 is not. The bridge keeps a whole guest copy of every buffer, so such a lock now takes a fresh slice
+  (DISCARD) and Unlock copies the whole copy (≤ 64 KB). `USF_NO_SMALL_DISCARD=1` restores the old way.
+- **getenv on every Direct3D call**: the bridge read its analysis switches per call (14% of the game thread in
+  getenv and much of another 20% in libc's compares). They are read once now, and the runtime's getenv answers from a
+  table (env_cache.c, invalidated by its own setenv).
+- **Indirect calls**: each virtual call binary-searched 45,190 functions (10% of the game thread); a direct-mapped
+  cache of 64K slots in front (dispatch.c) leaves 3.7%.
+- Tests: the scripted input (`USF_INPUT`) is parsed once (it was parsed at every pad read, and dominated the soak's
+  profile); the game folder is made absolute before the runtime changes directory (a relative light-copy folder
+  was not found on the PC).
+
+Title screen on the PC: 4.8 → 3.0 ms of CPU a frame; in a level (soak): 7-10 → 3.1-3.3 ms, 60 fps, no late frame.
+Research on other DXVK ports (Skyrim_Android, LMS_Android, spore-re, nfsu2-recompiled): they all keep
+dxvk-native 1.9.2b / 1.10.3 for Vulkan 1.1, decode DXT on the CPU, and load Turnip / PanVK drivers through
+adrenotools for old Adreno and Mali; dxvk 1.10.3 waits without spinning and synchronizes only up to the resource's
+last use (a candidate rebase), and has `d3d9.allowDirectBufferMapping` (not in 1.9.2b).

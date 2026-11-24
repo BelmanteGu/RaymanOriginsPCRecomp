@@ -15,6 +15,13 @@
 
 #include "usf/cpu.h"
 
+/* getenv / setenv remembered (env_cache.c): the runtime reads its switches in hot paths */
+#include <stdlib.h>
+char *usf_getenv(const char *name);
+int usf_setenv(const char *name, const char *value, int overwrite);
+#define getenv(n) usf_getenv(n)
+#define setenv(n, v, o) usf_setenv(n, v, o)
+
 typedef uint32_t (*HleFn)(CPU *c, uint32_t a);
 
 enum { CONV_STDCALL = 0, CONV_CDECL = 1, CONV_CALLSITE = 2, CONV_DATA = 3 };

@@ -12,6 +12,27 @@
 #include "dxvk_bridge.h"
 
 #define BAD 0x8876086Cu
+/* USF_LOCKSTATS=1 (analysis): locks that would make the CPU wait for the GPU (DXVK's WaitForResource), found by
+ * trying each lock first with D3DLOCK_DONOTWAIT; every 5 s the kinds of lock that would have waited, with counts */
+#define DONOTWAIT 0x4000u
+#define STILLDRAWING 0x8876021Cu
+static int lockstats = -1;
+static struct { int type; uint32_t a, b, usage, pool, flags, n, waits; } ls[64];
+static uint32_t ls_t0;
+static void lockstat(int type, uint32_t a, uint32_t b, uint32_t usage, uint32_t pool, uint32_t flags, int waited) {
+    int k = 0;
+    while (k < 64 && ls[k].n && !(ls[k].type == type && ls[k].a == a && ls[k].b == b && ls[k].usage == usage && ls[k].pool == pool && ls[k].flags == flags)) k++;
+    if (k == 64) return;
+    ls[k].type = type; ls[k].a = a; ls[k].b = b; ls[k].usage = usage; ls[k].pool = pool; ls[k].flags = flags;
+    ls[k].n++; ls[k].waits += waited;
+    uint32_t now = usf_ms();
+    if (now - ls_t0 < 5000) return;
+    ls_t0 = now;
+    for (int i = 0; i < 64 && ls[i].n; i++)
+        fprintf(stderr, "usf: lockstats: type %d %ux%u usage %x pool %u flags %x: %u locks, %u would wait\n",
+                                 ls[i].type, ls[i].a, ls[i].b, ls[i].usage, ls[i].pool, ls[i].flags, ls[i].n, ls[i].waits);
+    memset(ls, 0, sizeof ls);
+}
 /* ---- locks: the game writes into a guest copy; Unlock puts it into DXVK's memory ---- */
 #define LOCK_READONLY 0x10u
 #define LOCK_NOOVERWRITE 0x1000u
@@ -38,9 +59,15 @@ uint32_t dxl_lock_rect(Wrap *w, int slot, uint64_t face, uint64_t level, uint32_
     struct { int32_t pitch; int32_t pad; uint8_t *bits; } lr = {0};
     int32_t r;
     double t_lock = usf_stalls > 0 ? now_ms() : 0;
-    if (w->type == DXB_SURFACE) r = (int32_t)dxb_method(w->nat, slot)(w->nat, (uint64_t)(uintptr_t)&lr, 0, flags, 0, 0, 0, 0, 0, 0, 0, 0);
-    else if (w->type == DXB_CUBE) r = (int32_t)dxb_method(w->nat, slot)(w->nat, face, level, (uint64_t)(uintptr_t)&lr, 0, flags, 0, 0, 0, 0, 0, 0);
-    else r = (int32_t)dxb_method(w->nat, slot)(w->nat, level, (uint64_t)(uintptr_t)&lr, 0, flags, 0, 0, 0, 0, 0, 0, 0);
+    if (lockstats < 0) lockstats = getenv("USF_LOCKSTATS") != NULL;
+    int probe = lockstats > 0 && !(flags & (LOCK_DISCARD | LOCK_NOOVERWRITE | LOCK_READONLY | DONOTWAIT));
+    for (int pass = probe ? 0 : 1; pass < 2; pass++) {
+        uint32_t f = pass ? flags : flags | DONOTWAIT;
+        if (w->type == DXB_SURFACE) r = (int32_t)dxb_method(w->nat, slot)(w->nat, (uint64_t)(uintptr_t)&lr, 0, f, 0, 0, 0, 0, 0, 0, 0, 0);
+        else if (w->type == DXB_CUBE) r = (int32_t)dxb_method(w->nat, slot)(w->nat, face, level, (uint64_t)(uintptr_t)&lr, 0, f, 0, 0, 0, 0, 0, 0);
+        else r = (int32_t)dxb_method(w->nat, slot)(w->nat, level, (uint64_t)(uintptr_t)&lr, 0, f, 0, 0, 0, 0, 0, 0, 0);
+        if (!pass) { lockstat(w->type, desc[6], desc[7], desc[2], desc[3], flags, (uint32_t)r == STILLDRAWING); if ((uint32_t)r != STILLDRAWING) break; }
+    }
     if (usf_stalls > 0 && now_ms() - t_lock > 1.0)
         fprintf(stderr, "usf: slow lock %.1f ms: type %d fmt %08x usage %x pool %u %ux%u flags %x level %u\n",
                 now_ms() - t_lock, w->type, desc[0], desc[2], desc[3], desc[6], desc[7], flags, (unsigned)level);
@@ -233,8 +260,31 @@ __attribute__((noinline)) uint32_t dxl_lock_buffer(Wrap *w, uint32_t off, uint32
     if (usf_stalls > 0 && (flags & LOCK_DISCARD)) { extern uint32_t usf_big_discards, usf_discards;
         usf_discards++; if (total >= (4u << 20)) usf_big_discards++; }
     w->gen++;                                            /* (index ranges remembered for it are stale) */
+    /* A small dynamic buffer locked with no flags (the game does it for its sprite batches, 100+ times a second):
+     * DXVK maps dynamic buffers directly, so without DISCARD it must wait until the GPU has finished with the buffer,
+     * spinning (a third of the game thread on an Adreno 610; never on the PC, whose GPU is done by then). The guest
+     * copy has the whole buffer, so DXVK's contents are never needed: DXVK gives a fresh slice (DISCARD, no wait)
+     * and Unlock copies the whole guest copy into it. USF_NO_SMALL_DISCARD=1 turns it off. */
+    static int small_off = -1;
+    if (small_off < 0) small_off = getenv("USF_NO_SMALL_DISCARD") != NULL;
+    if (!small_off && (desc[2] & 0x200u) && desc[3] == 0 && total <= (64u << 10) && w->ring_on <= 0 &&
+        !(flags & (LOCK_DISCARD | LOCK_NOOVERWRITE | LOCK_READONLY))) {
+        int32_t r = (int32_t)dxb_method(w->nat, 11)(w->nat, 0, 0, (uint64_t)(uintptr_t)&p, LOCK_DISCARD, 0, 0, 0, 0, 0, 0, 0);
+        if (r < 0 || !p) { W32(g_pp, 0); return r < 0 ? (uint32_t)r : BAD; }
+        w->slice = p; w->dlo = w->dhi = 0;              /* (nothing pending for draws: Unlock copies it all) */
+        dxl_lock_push(w, 0, w->shadow, total, p);
+        W32(g_pp, w->shadow + off);
+        return 0;
+    }
     uint32_t nflags = dxl_ring_discard(w, desc, flags);
-    int32_t r = (int32_t)dxb_method(w->nat, 11)(w->nat, off, size, (uint64_t)(uintptr_t)&p, nflags, 0, 0, 0, 0, 0, 0, 0);
+    if (lockstats < 0) lockstats = getenv("USF_LOCKSTATS") != NULL;
+    int32_t r = STILLDRAWING;
+    if (lockstats > 0 && !(nflags & (LOCK_DISCARD | LOCK_NOOVERWRITE | LOCK_READONLY | DONOTWAIT))) {
+        r = (int32_t)dxb_method(w->nat, 11)(w->nat, off, size, (uint64_t)(uintptr_t)&p, nflags | DONOTWAIT, 0, 0, 0, 0, 0, 0, 0);
+        lockstat(w->type, total, size, desc[2], desc[3], nflags, (uint32_t)r == STILLDRAWING);
+    }
+    if ((uint32_t)r == STILLDRAWING)
+        r = (int32_t)dxb_method(w->nat, 11)(w->nat, off, size, (uint64_t)(uintptr_t)&p, nflags, 0, 0, 0, 0, 0, 0, 0);
     if (usf_stalls > 0 && now_ms() - t_lock > 1.0)
         fprintf(stderr, "usf: slow buffer lock %.1f ms: type %d size %u usage %x pool %u lock %u+%u flags %x (wrap %p)\n",
                 now_ms() - t_lock, w->type, total, desc[2], desc[3], off, size, flags, (void *)w);

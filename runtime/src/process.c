@@ -466,7 +466,12 @@ int main(int argc, char **argv) {
     char exe[1200];
     snprintf(exe, sizeof exe, "%s/%s", g_game_dir, GAME_EXE);
     if (load_image(exe)) { fprintf(stderr, "usf: cannot load %s\n", exe); return 1; }
+    {   /* absolute: the paths the game builds start from it, and the process is about to change directory */
+        char abs_dir[sizeof g_game_dir];
+        if (realpath(g_game_dir, abs_dir)) snprintf(g_game_dir, sizeof g_game_dir, "%s", abs_dir);
+    }
     if (chdir(g_game_dir)) { perror("usf: chdir to the game folder"); return 1; }
+    { void prof_start(void); prof_start(); }   /* USF_PROF=<seconds>: a sampling profile (prof.c) */
     build_peb();
     CPU *c = cpu_alloc();
     cpu_on_new_stack(c, 0x400000u);

@@ -174,7 +174,9 @@ static const uint8_t *made(Lite *l, uint32_t i, uint32_t upto) {
     s->used = ++l->clock;
     if (s->ready != UINT32_MAX && s->ready < upto) decode_to(s, upto + AHEAD > upto ? upto + AHEAD : UINT32_MAX - 1);
     t_made[r->method & 3] += now_ms() - t0;
-    if (getenv("USF_LITE_STATS")) {
+    static int stats = -1;
+    if (stats < 0) stats = getenv("USF_LITE_STATS") != NULL;
+    if (stats) {
         b_made[r->method & 3] += 1;
         if ((int)(b_made[1] + b_made[2]) % 200 == 0)
             fprintf(stderr, "usf: lite: zlib %.0f calls %.0f ms, opus %.0f calls %.0f ms\n", b_made[1], t_made[1], b_made[2], t_made[2]);
