@@ -465,3 +465,30 @@ most: three left only one frame in four drawn on the Redmi (15 drawn / 45 skippe
 drawn frame's ~30 ms of GPU kept the game behind. With one: the game at 60 steps a second, the picture at ~30.
 `USF_TEST_SLOW_MS=<ms>` slows each drawn frame (tests on the PC). The GPU time itself (~30 ms a frame at 1232x540 on
 the Adreno 610) is still to be explained.
+
+## 2026-11-24 — What the Adreno 610's frame costs (measured on the Redmi 10C), and options
+
+Tools added (all off unless asked for):
+- `DXVK_PASSLOG=1` (tools/android/dxvk_mobile_passlog.patch): render passes a second by kind (size, attachments,
+  load ops, depth attached / used, draws a pass). In a level: one scene pass (~175 draws, depth attached and loaded
+  but never used), one pass of the touch layer that reloads the back buffer, DXVK's blit to the screen.
+- `USF_NO_DEPTH=1`: no depth buffer at all (same picture). On the Redmi: no change (27.5 → 27-28.7 fps): not it.
+- `RAYMAN_RES=616x270` (a quarter of the pixels): 27.5 → a steady 60 fps, the CPU 18 → 12 ms: the cost is per pixel,
+  on the GPU.
+- `USF_SIMPLE_PS=1` (every pixel shader `texld; mov`): 27.5 → 36-39 fps, the picture wrong: shaders are part of it.
+- `USF_PS_ROTATE=<frame>` (dxvk_psrot.c): windows with one pixel shader left out at a time. The sprite shader
+  (`texld; mul by the vertex colour`, most of the scene's draws) costs ~20 ms of the 38 ms frame: no single effect,
+  the layers of sprites themselves. `USF_SHADER_BIN=<dir>` writes each shader's bytecode.
+- DXVK's translation of that 2-instruction shader is ~100 SPIR-V operations: a second texture read for fetch4
+  (OpImageGather), the shadow-sampler variant, fixed-function fog, the alpha test with OpKill, point sprites, all
+  chosen by specialization constants. A driver that folds them costs nothing; one that doesn't pays for all of it.
+  Next step (not done): a DXVK variant of the D3D9 shader compiler without the paths this game never uses.
+- The game's textures have full mip chains (DXT3/DXT5, 6-11 levels): not a cache problem.
+
+Options (the default is unchanged for strong phones):
+- Resolutions: the screen's height (up to 1440), 1080, 900, 810, 720, 630, 540, 480, 432, 360.
+- First start (no `lines=` yet): GpuTier.java reads the GPU's name (GL_RENDERER) and picks the height: Adreno
+  640+/7xx/8xx, Xclipse, Immortalis, Mali-G610+ full (≤1080); Adreno 616-630, Mali-G68/G7x 720; Adreno 610-615,
+  Mali-G52/G57, PowerVR 540; else 720.
+- Game files and GPU driver are choices in the launcher's own look (planks over the menu, touch or pad); GPU driver
+  has "System driver (Turnip off)" and Turnip (downloaded once, then switched on and off without downloading).

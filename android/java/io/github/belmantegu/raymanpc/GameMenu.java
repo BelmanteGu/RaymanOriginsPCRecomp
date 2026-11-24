@@ -75,7 +75,7 @@ final class GameMenu extends View {
         setBackgroundColor(inGame ? 0x99000000 : Color.BLACK);
         DisplayMetrics m = c.getResources().getDisplayMetrics();
         int sw = Math.max(m.widthPixels, m.heightPixels), sh = Math.min(m.widthPixels, m.heightPixels);
-        for (int h : new int[] {sh, 900, 720, 540}) {
+        for (int h : new int[] {Math.min(sh, 1440), 1080, 900, 810, 720, 630, 540, 480, 432, 360}) {
             String r = ((sw * h / sh) & ~7) + " x " + h;
             if (h <= sh && !res.contains(r)) res.add(r);
         }
@@ -111,6 +111,46 @@ final class GameMenu extends View {
     void release() { if (music != null) { music.release(); music = null; } }
     /** over the game: open again with the saved values */
     void reopen() { loadSettings(); screen = 2; f = 0; invalidate(); }
+    /* ---- a choice in the launcher's look (Game files, GPU driver): planks over the dimmed menu ---- */
+    private String choiceTitle, choiceMsg;
+    private String[] choiceItems;
+    private int choiceSel, choiceMark = -1;
+    private java.util.function.IntConsumer choiceCb;
+    /** items: their texts (translated here); mark: the current one (a tick), or -1; cb: the index, or -1 on back */
+    void choose(String title, String message, String[] items, int mark, java.util.function.IntConsumer cb) {
+        choiceTitle = t(title); choiceMsg = message == null ? null : t(message);
+        choiceItems = new String[items.length];
+        for (int i = 0; i < items.length; i++) choiceItems[i] = t(items[i]);
+        choiceMark = mark; choiceSel = Math.max(0, mark); choiceCb = cb;
+        invalidate();
+    }
+    private void choiceDone(int i) {
+        java.util.function.IntConsumer cb = choiceCb;
+        choiceItems = null; choiceCb = null;
+        if (cb != null) cb.accept(i);
+        invalidate();
+    }
+    private void drawChoice(Canvas c) {
+        hitBox.clear(); hitDo.clear();                             /* nothing under it takes a touch */
+        android.graphics.Paint p = new android.graphics.Paint();
+        p.setColor(0xEE000000);
+        c.drawRect(0, 0, MenuArt.W, MenuArt.H, p);
+        hit(0, 0, MenuArt.W, MenuArt.H, () -> choiceDone(-1));     /* outside the planks: back */
+        float top = 300 - (choiceItems.length - 2) * 30;
+        art.text(c, choiceTitle, 0.7f, WHITE, 1170, top, SHADOW);
+        if (choiceMsg != null) art.text(c, choiceMsg, 0.36f, ORANGE, 1170, top + 70, SHADOW);
+        android.graphics.Bitmap plank = art.tex.get("settingsbackbut");
+        for (int i = 0; i < choiceItems.length; i++) {
+            float y = top + 180 + i * 140;
+            boolean on = i == choiceSel;
+            if (plank != null) art.image(c, plank, 1170 - 460, y - 66, 920, 132);
+            String s = (i == choiceMark ? "> " : "") + choiceItems[i];      /* (the game's font has no tick) */
+            art.text(c, s, on ? 0.5f : 0.46f, on ? WHITE : ORANGE, 1170, y, SHADOW);
+            final int k = i;
+            hit(1170 - 460, y - 66, 1170 + 460, y + 66, () -> { if (choiceSel == k) choiceDone(k); else choiceSel = k; });
+        }
+    }
+
     /** a long job's text ("Making the light copy 45%"), or null when it is over */
     void showBusy(String text) { busy = text; invalidate(); }
     void gameChosen(boolean ok) { status = ""; screen = ok ? 1 : 0; invalidate(); }
@@ -175,6 +215,7 @@ final class GameMenu extends View {
         art.image(c, art.canal, 78, 968, 68, 68);
         art.text(c, "Projeto Belmante", 0.44f, WHITE, 335, 1003, SHADOW);
         hit(40, 960, 560, 1044, () -> getContext().startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/@belmante"))));
+        if (choiceItems != null) drawChoice(c);
         if (busy != null) {                               /* the job's band over everything */
             android.graphics.Paint p = new android.graphics.Paint();
             p.setColor(0xC0000000);
@@ -354,6 +395,14 @@ final class GameMenu extends View {
             default: return false;
         }
         if (e.getAction() != KeyEvent.ACTION_DOWN || busy != null) return true;
+        if (choiceItems != null) {
+            if (k.equals("down")) choiceSel = Math.min(choiceItems.length - 1, choiceSel + 1);
+            else if (k.equals("up")) choiceSel = Math.max(0, choiceSel - 1);
+            else if (k.equals("ok")) choiceDone(choiceSel);
+            else if (k.equals("back")) choiceDone(-1);
+            invalidate();
+            return true;
+        }
         if (screen == 0) { if (k.equals("ok")) titleGo(); else if (k.equals("back")) host.quit(); }
         else if (screen == 1) {
             if (k.equals("down") && sel < HOME.length - 1) sel++;

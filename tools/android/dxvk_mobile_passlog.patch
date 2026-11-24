@@ -1,0 +1,157 @@
+--- a/src/dxvk/dxvk_cmdlist.h
++++ b/src/dxvk/dxvk_cmdlist.h
+@@ -13,6 +13,7 @@
+ #include "dxvk_signal.h"
+ #include "dxvk_staging.h"
+ #include "dxvk_stats.h"
++#include "dxvk_passlog.h"
+ 
+ namespace dxvk {
+   
+@@ -263,6 +264,7 @@
+     void cmdBeginRenderPass(
+       const VkRenderPassBeginInfo*  pRenderPassBegin,
+             VkSubpassContents       contents) {
++      passlog::begin(pRenderPassBegin->renderArea.extent.width, pRenderPassBegin->renderArea.extent.height);
+       m_vkd->vkCmdBeginRenderPass(m_execBuffer,
+         pRenderPassBegin, contents);
+     }
+@@ -584,6 +586,7 @@
+     
+     void cmdEndRenderPass() {
+       m_vkd->vkCmdEndRenderPass(m_execBuffer);
++      passlog::end();
+     }
+     
+     
+--- a/src/dxvk/dxvk_context.cpp
++++ b/src/dxvk/dxvk_context.cpp
+@@ -1501,6 +1501,7 @@
+           uint32_t firstVertex,
+           uint32_t firstInstance) {
+     if (this->commitGraphicsState<false, false>()) {
++      passlog::draw(m_state.gp.state.ds.enableDepthTest() || m_state.gp.state.ds.enableDepthWrite() || m_state.gp.state.ds.enableStencilTest());
+       m_cmd->cmdDraw(
+         vertexCount, instanceCount,
+         firstVertex, firstInstance);
+@@ -1555,6 +1556,7 @@
+           uint32_t vertexOffset,
+           uint32_t firstInstance) {
+     if (this->commitGraphicsState<true, false>()) {
++      passlog::draw(m_state.gp.state.ds.enableDepthTest() || m_state.gp.state.ds.enableDepthWrite() || m_state.gp.state.ds.enableStencilTest());
+       m_cmd->cmdDrawIndexed(
+         indexCount, instanceCount,
+         firstIndex, vertexOffset,
+@@ -4023,6 +4025,8 @@
+     info.clearValueCount      = clearValueCount;
+     info.pClearValues         = clearValues;
+     
++    passlog::mainInfo(framebuffer->numAttachments(), m_state.om.renderTargets.depth.view != nullptr,
++      uint32_t(ops.colorOps[0].loadOp), uint32_t(ops.depthOps.loadOpD));
+     m_cmd->cmdBeginRenderPass(&info,
+       VK_SUBPASS_CONTENTS_INLINE);
+     
+--- /dev/null
++++ b/src/dxvk/dxvk_passlog.h
+@@ -0,0 +1,101 @@
++#pragma once
++
++// DXVK_PASSLOG=1 (Rayman Origins PC port, analysis for tiled mobile GPUs): what the render passes of a second are.
++// Every 2 s: passes a second (the context's own and the internal ones: clears, blits, resolves, mip generation) and,
++// for the context's passes, each kind (size, attachments, depth attached / used by a draw, colour and depth load ops)
++// with its count a second and its draws per pass. Recorded on the CS thread only (no lock).
++
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++
++#include "../util/log/log.h"
++
++namespace dxvk::passlog {
++
++  struct Kind { uint32_t w, h, att, depth, colorLoad, depthLoad, depthUsed; uint64_t n, draws; };
++
++  struct State {
++    int on = -1;
++    bool inPass = false, mainPass = false, depthUsed = false;
++    uint32_t w = 0, h = 0, att = 0, depth = 0, colorLoad = 0, depthLoad = 0, draws = 0;
++    bool pendingMain = false;
++    uint32_t pAtt = 0, pDepth = 0, pColorLoad = 0, pDepthLoad = 0;
++    uint64_t passes = 0, internal = 0, totalDraws = 0;
++    Kind kinds[48] = {};
++    int nKinds = 0;
++    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++  };
++
++  inline State& st() { static State s; return s; }
++  inline bool enabled() {
++    State& s = st();
++    if (s.on < 0) { const char* e = std::getenv("DXVK_PASSLOG"); s.on = e && *e && *e != '0'; }
++    return s.on;
++  }
++  inline const char* op(uint32_t o) { return o == 0 ? "LOAD" : o == 1 ? "CLEAR" : o == 2 ? "DONT" : "?"; }
++
++  // the context's pass about to begin: its attachments and load ops (renderPassBindFramebuffer)
++  inline void mainInfo(uint32_t att, uint32_t depth, uint32_t colorLoad, uint32_t depthLoad) {
++    if (!enabled()) return;
++    State& s = st();
++    s.pendingMain = true; s.pAtt = att; s.pDepth = depth; s.pColorLoad = colorLoad; s.pDepthLoad = depthLoad;
++  }
++
++  inline void report() {
++    State& s = st();
++    auto now = std::chrono::steady_clock::now();
++    double sec = std::chrono::duration<double>(now - s.t0).count();
++    if (sec < 2.0) return;
++    char line[256];
++    std::snprintf(line, sizeof line, "passlog: %.0f passes/s (%.0f internal), %.0f draws/s",
++      (s.passes + s.internal) / sec, s.internal / sec, s.totalDraws / sec);
++    Logger::info(line);
++    for (int i = 0; i < s.nKinds; i++) {
++      const Kind& k = s.kinds[i];
++      std::snprintf(line, sizeof line, "passlog:   %6.1f/s %4ux%-4u att %u depth %s%s color %s depth %s, %.1f draws/pass",
++        k.n / sec, k.w, k.h, k.att, k.depth ? "yes" : "no", k.depth ? (k.depthUsed ? " (used)" : " (unused)") : "",
++        op(k.colorLoad), k.depth ? op(k.depthLoad) : "-", k.n ? double(k.draws) / k.n : 0.0);
++      Logger::info(line);
++    }
++    s.passes = s.internal = s.totalDraws = 0;
++    s.nKinds = 0;
++    s.t0 = now;
++  }
++
++  inline void begin(uint32_t w, uint32_t h) {
++    if (!enabled()) return;
++    State& s = st();
++    s.inPass = true; s.mainPass = s.pendingMain; s.pendingMain = false;
++    s.w = w; s.h = h; s.draws = 0; s.depthUsed = false;
++    s.att = s.pAtt; s.depth = s.pDepth; s.colorLoad = s.pColorLoad; s.depthLoad = s.pDepthLoad;
++  }
++
++  inline void draw(bool depthUsed) {
++    if (!enabled()) return;
++    State& s = st();
++    s.draws++; s.totalDraws++;
++    s.depthUsed |= depthUsed;
++  }
++
++  inline void end() {
++    if (!enabled()) return;
++    State& s = st();
++    if (!s.inPass) return;
++    s.inPass = false;
++    if (!s.mainPass) { s.internal++; report(); return; }
++    s.passes++;
++    int i = 0;
++    for (; i < s.nKinds; i++) {
++      Kind& k = s.kinds[i];
++      if (k.w == s.w && k.h == s.h && k.att == s.att && k.depth == s.depth && k.colorLoad == s.colorLoad
++       && k.depthLoad == s.depthLoad && k.depthUsed == uint32_t(s.depthUsed)) break;
++    }
++    if (i == s.nKinds && s.nKinds < 48)
++      s.kinds[s.nKinds++] = Kind { s.w, s.h, s.att, s.depth, s.colorLoad, s.depthLoad, uint32_t(s.depthUsed), 0, 0 };
++    if (i < 48) { s.kinds[i].n++; s.kinds[i].draws += s.draws; }
++    report();
++  }
++
++}

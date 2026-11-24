@@ -5,6 +5,8 @@
  * (and face, and depth slice) row by row into DXVK's locked memory, whose pitch may differ from the file's.
  * What it does not do: other image formats, resizing or format conversion (the file's size and format are used).
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "d3d9.h"
@@ -36,6 +38,7 @@ uint32_t dxb_d3dx_texture(CPU *c, uint32_t device, uint32_t src, uint32_t size, 
     uint32_t fmt = d3dx_dds_format(h);
     if (!fmt || !width || !height) return D3DXERR_INVALIDDATA;
     if (!mips) mips = 1;
+    if (getenv("USF_TEXLOG")) fprintf(stderr, "usf: dds %ux%u mips %u fmt %08x\n", width, height, mips, fmt);
     int is_cube = (caps2 & 0x200u) != 0, is_vol = (caps2 & 0x200000u) != 0;
     if ((kind == 3) != is_cube) return D3DXERR_INVALIDDATA;
     if (!is_vol || !depth) depth = 1;

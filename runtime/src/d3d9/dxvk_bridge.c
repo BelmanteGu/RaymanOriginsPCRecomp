@@ -284,6 +284,30 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     int n;
     const char *s = sigs(w->type, &n)[slot];
     if (w->type == DXB_DEVICE && dxb_skip_gpu(slot)) return 0;   /* a skipped frame's GPU work */
+    if (w->type == DXB_DEVICE) {                          /* USF_PS_ROTATE (dxvk_psrot.c): each pixel shader's cost */
+        void psrot_set(uint32_t hash); int psrot_draw(void);
+        if (slot == 107) { Wrap *p = dxb_of(ARG(1)); psrot_set(p ? p->code_hash : 0); }
+        if (slot >= 81 && slot <= 84 && psrot_draw()) return 0;
+    }
+    if (w->type == DXB_DEVICE && slot == 107 && ARG(1)) {   /* USF_SIMPLE_PS=1 (experiment): every pixel shader a minimal one */
+        static int simple = -1;
+        static void *ps;
+        if (simple < 0) simple = getenv("USF_SIMPLE_PS") != NULL;
+        if (simple) {
+            if (!ps) {                                   /* ps_2_0: dcl t0.xy; dcl_2d s0; texld r0, t0, s0; mov oC0, r0 */
+                static const uint32_t code[] = {0xFFFF0200, 0x0200001F, 0x80000000, 0xB0030000, 0x0200001F, 0x90000000,
+                    0xA00F0800, 0x03000042, 0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000,
+                    0x0000FFFF};
+                dxb_method(w->nat, 106)(w->nat, (uint64_t)(uintptr_t)code, (uint64_t)(uintptr_t)&ps, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            }
+            if (ps) return (uint32_t)dxb_method(w->nat, 107)(w->nat, (uint64_t)(uintptr_t)ps, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+    }
+    if (w->type == DXB_DEVICE && slot == 39) {          /* USF_NO_DEPTH=1 (experiment): the game's depth buffer unbound */
+        static int nodepth = -1;
+        if (nodepth < 0) nodepth = getenv("USF_NO_DEPTH") != NULL;
+        if (nodepth) return (uint32_t)dxb_method(w->nat, 39)(w->nat, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
     if (s[0] == '*') return special(c, a, w, slot);
     uint64_t x[11] = {0};
     void *outs[2] = {0};
@@ -423,6 +447,12 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
         Wrap *sw = dxb_of(R32(out_at[0]));
         if (sw) sw->code_hash = h;
         if (dsw.pslog && slot == 106) fprintf(stderr, "usf: pixel shader %08x (frame %u)\n", h, g_dev.frames);
+        if (getenv("USF_SHADER_BIN")) {                  /* (analysis) USF_SHADER_BIN=<dir>: each shader's bytecode, by hash */
+            char fn[600];
+            snprintf(fn, sizeof fn, "%s/%s_%08x.bin", getenv("USF_SHADER_BIN"), slot == 106 ? "ps" : "vs", h);
+            FILE *f = fopen(fn, "wb");
+            if (f) { uint32_t q = ARG(1); for (int i = 0; i < 65536; i++, q += 4) { uint32_t t = R32(q); fwrite(&t, 4, 1, f); if (t == 0x0000FFFFu) break; } fclose(f); }
+        }
     }
     return r;
 }
@@ -509,6 +539,9 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
             pp_out(pp, ARG(5));
             if (!(ARG(4) & 2u)) c->fpu_cw = (uint16_t)(c->fpu_cw & ~0x0300u);   /* no FPU_PRESERVE: 24-bit x87 */
             device_guest = dev ? dxb_wrap(dev, DXB_DEVICE) : 0;
+            /* USF_NO_DEPTH=1 (experiment): no depth / stencil buffer bound at all (the game's 2D scene never tests or
+             * writes depth, measured by DXVK_PASSLOG, but DXVK attached and loaded it every frame) */
+            if (dev && getenv("USF_NO_DEPTH")) CALL(dev, 39, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
             W32(ARG(6), device_guest);
             fprintf(stderr, "usf: DXVK device %ux%u -> %08x\n", R32(ARG(5)), R32(ARG(5) + 4), r);
             if (!r) apply_aspect(R32(ARG(5)), R32(ARG(5) + 4));   /* Hor+ for the window's shape (d3d9_device.c) */
@@ -545,6 +578,7 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
                 if (slow < 0) slow = getenv("USF_TEST_SLOW_MS") ? atoi(getenv("USF_TEST_SLOW_MS")) : 0;
                 if (slow > 0) { struct timespec z = {0, slow * 1000000L}; nanosleep(&z, NULL); }
             }
+            { void psrot_frame(void); psrot_frame(); }
             dxb_overlay_draw(n);                          /* the touch layer over the frame (dxvk_overlay.c) */
             uint32_t r = (uint32_t)CALL(n, 17, ARG(1) ? (uint64_t)(uintptr_t)HOST(ARG(1)) : 0,
                                         ARG(2) ? (uint64_t)(uintptr_t)HOST(ARG(2)) : 0, ARG(3) ? (uint64_t)(uintptr_t)g_window : 0,
@@ -558,6 +592,10 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
             float z;
             uint32_t zb = ARG(5);
             memcpy(&z, &zb, 4);
+            static int nodepth = -1;
+            if (nodepth < 0) nodepth = getenv("USF_NO_DEPTH") != NULL;
+            if (nodepth && !(ARG(3) & ~6u)) return 0;               /* only depth / stencil: nothing to clear */
+            if (nodepth) W32(a + 12, ARG(3) & ~6u);              /* (the colour part still) */
             return (uint32_t)((int32_t (*)(void *, uint32_t, const void *, uint32_t, uint32_t, float, uint32_t))dxb_method(n, 43))(
                 n, ARG(1), ARG(2) ? HOST(ARG(2)) : NULL, ARG(3), ARG(4), z, ARG(6));
         }

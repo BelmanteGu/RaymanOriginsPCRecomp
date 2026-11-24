@@ -46,6 +46,24 @@ final class GpuDrivers {
             return s.split("\n")[0].trim();
         } catch (Exception e) { return null; }
     }
+    /** a driver unpacked earlier in files/gpu_drivers/<folder>/ (its library named in meta.json) */
+    static boolean installed(Context c, String folder) { return library(c, folder) != null; }
+    private static String library(Context c, String folder) {
+        File dir = new File(root(c), folder);
+        try {
+            String lib = new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(dir, "meta.json").toPath()), "UTF-8")).optString("libraryName", null);
+            if (lib != null && new File(dir, lib).exists()) return lib;
+        } catch (Exception ignored) {}
+        return null;
+    }
+    /** selects a driver already unpacked (Turnip back on, without downloading it again) */
+    static void use(Context c, String folder) {
+        String lib = library(c, folder);
+        if (lib == null) return;
+        try (FileWriter w = new FileWriter(new File(root(c), "selected"))) { w.write(folder + "\n" + lib + "\n"); } catch (Exception ignored) {}
+        new File(root(c), "failed").delete();
+        new File(root(c), "trial").delete();
+    }
     static void useSystem(Context c) { new File(root(c), "selected").delete(); new File(root(c), "failed").delete(); }
 
     /** Downloads the Turnip driver's zip from GitHub and selects it. null, or what went wrong. */
