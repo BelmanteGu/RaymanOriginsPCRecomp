@@ -249,6 +249,30 @@ static void switches(void) {
     dsw.pslog = getenv("USF_PS_LOG") != NULL;
     dsw.init = 1;
 }
+/* Frameskip (touch.c usf_frameskip, d3d9_device.c game_pace): the frame after one that left the game behind the clock
+ * is run without its GPU work: draws, clears, copies between surfaces and its Present go nowhere (state, uploads and
+ * locks still go to DXVK, so the next drawn frame is whole). At most one in a row (three left only one frame in four
+ * drawn on a Redmi 10C: the drawn frame's GPU time kept the game behind): a 30 fps picture, the game at 60. */
+int dxb_skipping;
+static int dxb_skip_gpu(int slot) {
+    return dxb_skipping && ((slot >= 81 && slot <= 84) || slot == 43 || slot == 34 || slot == 35 || slot == 32);
+}
+static void dxb_decide_skip(void) {
+    extern int usf_pace_behind;
+    static int in_row;
+    dxb_skipping = usf_pace_behind && in_row < 1;      /* one in a row: at least every other frame is drawn */
+    in_row = dxb_skipping ? in_row + 1 : 0;
+    static int n_drawn, n_skipped;                       /* USF_SKIPLOG=1: frames drawn and skipped, every 2 s */
+    static double t0;
+    static int log = -1;
+    if (log < 0) log = getenv("USF_SKIPLOG") != NULL;
+    if (log) {
+        if (dxb_skipping) n_skipped++; else n_drawn++;
+        double t = now_ms();
+        if (!t0) t0 = t;
+        if (t - t0 >= 2000) { fprintf(stderr, "usf: frameskip: %.1f drawn, %.1f skipped a second\n", n_drawn * 1000.0 / (t - t0), n_skipped * 1000.0 / (t - t0)); n_drawn = n_skipped = 0; t0 = t; }
+    }
+}
 static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     if (!dsw.init) switches();
     Wrap *w = dxb_of(ARG(0));
@@ -259,6 +283,7 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     }
     int n;
     const char *s = sigs(w->type, &n)[slot];
+    if (w->type == DXB_DEVICE && dxb_skip_gpu(slot)) return 0;   /* a skipped frame's GPU work */
     if (s[0] == '*') return special(c, a, w, slot);
     uint64_t x[11] = {0};
     void *outs[2] = {0};
@@ -509,12 +534,24 @@ __attribute__((noinline)) static uint32_t special(CPU *c, uint32_t a, Wrap *w, i
             return r;
         }
         case 17: {                                        /* Present(src, dst, window, dirty) */
+            if (dxb_skipping) {                           /* a skipped frame: nothing shown, the game still paced */
+                dxb_after_present(n, NULL);
+                game_pace();
+                dxb_decide_skip();
+                return 0;
+            }
+            {   /* USF_TEST_SLOW_MS=<ms> (tests): each drawn frame takes that much longer, as on a slow GPU */
+                static int slow = -1;
+                if (slow < 0) slow = getenv("USF_TEST_SLOW_MS") ? atoi(getenv("USF_TEST_SLOW_MS")) : 0;
+                if (slow > 0) { struct timespec z = {0, slow * 1000000L}; nanosleep(&z, NULL); }
+            }
             dxb_overlay_draw(n);                          /* the touch layer over the frame (dxvk_overlay.c) */
             uint32_t r = (uint32_t)CALL(n, 17, ARG(1) ? (uint64_t)(uintptr_t)HOST(ARG(1)) : 0,
                                         ARG(2) ? (uint64_t)(uintptr_t)HOST(ARG(2)) : 0, ARG(3) ? (uint64_t)(uintptr_t)g_window : 0,
                                         ARG(4) ? (uint64_t)(uintptr_t)HOST(ARG(4)) : 0, 0, 0, 0, 0, 0, 0, 0);
             dxb_after_present(n, NULL);
             game_pace();                                  /* 60 / 120 fps and the engine's rates (d3d9_device.c) */
+            dxb_decide_skip();
             return r;
         }
         case 43: {                                        /* Clear(count, rects, flags, color, float z, stencil) */

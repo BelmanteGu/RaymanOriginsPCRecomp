@@ -453,3 +453,15 @@ MAILBOX kept.
 - **Redmi 10C with Turnip 26.3** (the user, 2026-11-24): "Turnip Adreno (TM) 610", `textureCompressionBC: 1` (the
   game's DXT textures as they are), the driver's trial passed; some visual errors of the Qualcomm driver are gone. In
   a level still 28-37 fps at 1232x540 (CPU 11-15 ms a frame, target 60): GPU-bound, still to be found.
+
+## 2026-11-24 — Frameskip
+
+The game advances one step per presented frame, so a phone that draws 35 frames a second played it at 58% speed
+(the Redmi 10C's "slow"). Frameskip (launcher Options → Display, a check box; on by default on Android,
+`USF_FRAMESKIP=0/1`): `game_pace` catches lost steps up (up to 4 frames behind) instead of starting again from now,
+and a frame that leaves the game behind the clock makes the next one run undrawn: the DXVK bridge sends none of its
+GPU work (draws, clears, surface copies, Present) while state, uploads and locks still go to DXVK. One in a row at
+most: three left only one frame in four drawn on the Redmi (15 drawn / 45 skipped a second, `USF_SKIPLOG=1`), as each
+drawn frame's ~30 ms of GPU kept the game behind. With one: the game at 60 steps a second, the picture at ~30.
+`USF_TEST_SLOW_MS=<ms>` slows each drawn frame (tests on the PC). The GPU time itself (~30 ms a frame at 1232x540 on
+the Adreno 610) is still to be explained.

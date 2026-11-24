@@ -319,6 +319,7 @@ static uint32_t Reset(CPU *c, uint32_t a) {                     /* a new size (t
  * limit; another rate also sets the engine's app-loop and logic rates, so RAYMAN_FPS=120 is 120 real logic steps
  * per second, not interpolation), whatever the display's refresh (a 144 Hz screen would otherwise run the game 2.4 times too fast). A frame
  * that comes late resets the schedule instead of being caught up. */
+int usf_pace_behind;                                         /* the frame just paced is behind the clock (frameskip) */
 void game_pace(void);
 void game_pace(void) {
     { void pad_icons_frame(void); pad_icons_frame(); }       /* button icons or key names in texts (pad_icons.c) */
@@ -337,8 +338,13 @@ void game_pace(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     double now = (double)ts.tv_sec + ts.tv_nsec / 1e9, period = 1.0 / fps;
-    if (next == 0.0 || now > next + period) next = now;           /* first frame, or late: start again from now */
-    else if (now < next) {
+    int usf_frameskip(void);
+    int skip = usf_frameskip();
+    /* late: start again from now; with frameskip the lost steps are caught up instead (frames run undrawn), unless
+     * too far behind (more than 4 frames: a loading screen) */
+    if (next == 0.0 || now > next + (skip ? 4 : 1) * period) next = now;
+    usf_pace_behind = skip && now > next + period * 0.25;
+    if (now < next) {
         double d = next - now;
         struct timespec sl = {(time_t)d, (long)((d - (double)(time_t)d) * 1e9)};
         while (nanosleep(&sl, &sl) && errno == EINTR) {}

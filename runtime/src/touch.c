@@ -27,7 +27,7 @@ enum { B_UP = 0x0001, B_DOWN = 0x0002, B_LEFT = 0x0004, B_RIGHT = 0x0008, B_STAR
        B_B = 0x2000, B_X = 0x4000, B_RUN = 0x0200, B_MENU = 0x8000u << 1 /* not a pad bit: the port's menu */ };
 
 /* size 0..2, opacity 0..2; stick 0 floating / 1 fixed; the launcher's keys too (GameMenu.java) */
-typedef struct { int on, size, opacity, fps120, runhold, lang, stick, padhides, showfps, vibration; } Settings;
+typedef struct { int on, size, opacity, fps120, runhold, lang, stick, padhides, showfps, vibration, frameskip; } Settings;
 static Settings set = {1, 1, 1, 0, 0, 0, 0, 1, 0, 1};
 static int active;                                     /* the layer exists (Android, or RAYMAN_TOUCH on the PC) */
 static int menu_open, editing, run_on, dirty = 1, pad_hidden;
@@ -110,6 +110,12 @@ static void load(void) {
     set.padhides = port_setting("padhides", 1) ? 1 : 0;
     set.showfps = port_setting("showfps", 0) ? 1 : 0;
     set.vibration = port_setting("vibration", 1) ? 1 : 0;
+#ifdef __ANDROID__
+    set.frameskip = port_setting("frameskip", 1) ? 1 : 0;       /* on by default on a phone (see usf_frameskip) */
+#else
+    set.frameskip = port_setting("frameskip", 0) ? 1 : 0;
+#endif
+    if (getenv("USF_FRAMESKIP")) set.frameskip = atoi(getenv("USF_FRAMESKIP")) != 0;
     default_places();
     for (int i = 0; i <= NB; i++) {
         char k[8];
@@ -140,6 +146,11 @@ void touch_init(void) {
 }
 int touch_active(void);
 int touch_active(void) { return active; }
+/* Frameskip (the launcher's Options, Display): the game advances one step per presented frame, so a phone that draws
+ * 35 frames a second plays it at 58% speed; with it, a frame behind the clock is run without being drawn (the DXVK
+ * bridge sends none of its GPU work), up to three in a row, and the game keeps its speed (d3d9_device.c game_pace). */
+int usf_frameskip(void);
+int usf_frameskip(void) { return set.frameskip; }
 
 /* ---- the port's menu ---- */
 enum { T_TITLE, T_CONTROLS, T_SIZE, T_OPACITY, T_RUN, T_CLOSE, T_ON, T_OFF, T_S, T_M, T_L, T_TOGGLE, T_HOLD, T_DRAG, T_RESET, T_DONE, T_N };
