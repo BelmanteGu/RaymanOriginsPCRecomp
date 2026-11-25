@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="runtime/assets/app_icon.png" alt="Rayman Origins" width="180">
+
 # Rayman Origins — PC Recomp
 
 **The Windows (Steam/Ubisoft) version of Rayman Origins, statically recompiled to native code.**
