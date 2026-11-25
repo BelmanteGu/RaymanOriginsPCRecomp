@@ -500,3 +500,13 @@ sprite shader read its texture twice per pixel. Without them (this game uses nei
 the sprite shader is 313 SPIR-V operations with one read instead of 348 with two plus a gather, and the Redmi 10C's
 level went from ~27.5 to **~35.5 fps** (no frameskip, more draws on screen than in the earlier run). Resolutions
 also down to 300 and 270 lines.
+
+## 2026-11-24 — Leaving and coming back; the FPS counter
+
+- **Black screen after leaving the game and coming back** (Android): Android gives the app a new window when it
+  returns, and DXVK kept presenting to a surface made on the old one (no "surface lost" from the driver).
+  tools/android/dxvk_mobile_window.patch: the presenter remembers the ANativeWindow its surface was made on and
+  makes a new surface when SDL's window has another one (none while in the background: presents are skipped);
+  the surface is made with the instance's own vkCreateAndroidSurfaceKHR (SDL's would come from the system's
+  libvulkan, not from Turnip). Checked by the user on the Redmi 10C.
+- **Show FPS** is DXVK's own counter now (`dxvk.hud = fps`, scale 1.5 on a phone): the frames actually presented.

@@ -1,0 +1,112 @@
+--- a/src/wsi/wsi_presenter.h
++++ b/src/wsi/wsi_presenter.h
+@@ -18,4 +18,12 @@
+     const Rc<vk::InstanceFn>& vki,
+           VkSurfaceKHR*       pSurface);
+ 
++  /**
++    * \brief The window system's own window behind a window (Android: its ANativeWindow), or null
++    *
++    * Port: Android replaces the window when the app leaves and comes back; a surface made on the old one shows
++    * nothing. The presenter compares it to the one its surface was made on.
++    */
++  void* nativeWindowOf(HWND hWindow);
++
+ }
+\ Nenhum caractere de nova linha no final do arquivo
+--- a/src/wsi/sdl2/wsi_presenter_sdl2.cpp
++++ b/src/wsi/sdl2/wsi_presenter_sdl2.cpp
+@@ -40,10 +40,36 @@
+     }
+ #endif
+     SDL_Window* window = fromHwnd(hWindow);
++#ifdef __ANDROID__
++    {   // the window's ANativeWindow through this instance's own vkCreateAndroidSurfaceKHR (SDL's would come from
++        // the system's libvulkan, not from a driver of the player's), and none while the app is in the background
++      void* nw = nativeWindowOf(hWindow);
++      if (!nw)
++        return VK_ERROR_SURFACE_LOST_KHR;
++      auto create = reinterpret_cast<PFN_CreateAndroidSurface>(vki->sym("vkCreateAndroidSurfaceKHR"));
++      if (!create)
++        return VK_ERROR_EXTENSION_NOT_PRESENT;
++      AndroidSurfaceCreateInfo info = { VkStructureType(1000008000), nullptr, 0, nw };
++      return create(vki->instance(), &info, nullptr, pSurface);
++    }
++#endif
+ 
+     return SDL_Vulkan_CreateSurface(window, vki->instance(), nullptr, pSurface)
+          ? VK_SUCCESS
+          : VK_ERROR_OUT_OF_HOST_MEMORY;
+   }
+ 
++  void* nativeWindowOf(HWND hWindow) {
++#ifdef __ANDROID__
++    NativeSurface ns;
++    if (nativeSurface(hWindow, &ns))
++      return ns.window;
++    SDL_Window* window = fromHwnd(hWindow);
++    return window ? SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr) : nullptr;
++#else
++    (void) hWindow;
++    return nullptr;
++#endif
++  }
++
+ }
+\ Nenhum caractere de nova linha no final do arquivo
+--- a/src/vulkan/vulkan_presenter.cpp
++++ b/src/vulkan/vulkan_presenter.cpp
+@@ -47,6 +47,10 @@
+ 
+ 
+   VkResult Presenter::acquireNextImage(PresenterSync& sync, uint32_t& index) {
++    // Port: the app left and came back: the native window is another one, the surface shows nothing
++    if (m_surface && m_surfaceWindow != wsi::nativeWindowOf(m_window))
++      return VK_ERROR_SURFACE_LOST_KHR;
++
+     sync = m_semaphores.at(m_frameIndex);
+ 
+     // Don't acquire more than one image at a time
+@@ -105,6 +109,24 @@
+     if (m_swapchain)
+       destroySwapchain();
+ 
++    // Port: a new native window (the app came back): a new surface; no window (in the background): no swap
++    // chain until there is one again (presents are skipped meanwhile)
++    if (m_surfaceWindow != wsi::nativeWindowOf(m_window)) {
++      if (m_surface)
++        destroySurface();
++      m_surface = VK_NULL_HANDLE;
++      m_surfaceWindow = nullptr;
++      if (!wsi::nativeWindowOf(m_window))
++        return VK_SUCCESS;
++      VkResult s = createSurface();
++      if (s != VK_SUCCESS) {
++        m_surface = VK_NULL_HANDLE;
++        return VK_SUCCESS;
++      }
++    }
++    if (!m_surface)
++      return VK_SUCCESS;
++
+     // Query surface capabilities. Some properties might
+     // have changed, including the size limits and supported
+     // present modes, so we'll just query everything again.
+@@ -452,6 +474,7 @@
+     
+     if (status != VK_SUCCESS)
+       return status;
++    m_surfaceWindow = wsi::nativeWindowOf(m_window);
+     
+     VkBool32 supportStatus = VK_FALSE;
+ 
+--- a/src/vulkan/vulkan_presenter.h
++++ b/src/vulkan/vulkan_presenter.h
+@@ -193,6 +193,7 @@
+ 
+     HWND              m_window      = nullptr;
+     VkSurfaceKHR      m_surface     = VK_NULL_HANDLE;
++    void*             m_surfaceWindow = nullptr;  // (port: the native window the surface was made on)
+     VkSwapchainKHR    m_swapchain   = VK_NULL_HANDLE;
+ 
+     std::vector<PresenterImage> m_images;

@@ -60,13 +60,25 @@ int dxb_enabled(void) {
      * no cure on a 144 Hz panel (60 does not divide 144: frames alternate 14 and 21 ms), so DXVK's frame limiter
      * paces the frames to USF_FPS (default 60; 0 = uncapped), presenting without waiting for the vblank (on Wayland
      * the compositor still shows whole frames). USF_NOVSYNC: uncapped (tests); USF_VSYNC=1: FIFO vsync as well. */
-    static char cfg[160];
+    static char cfg[256];
     int fps = 0;                       /* Rayman: game_pace() paces (60/120 live from the settings), not DXVK */
     /* cachedWriteOnlyBuffers: the dynamic buffers in cached system memory, not video memory mapped over PCIe. The
      * bridge copies the game's vertices into them at each draw (3 MB a frame in a race), and those writes ran at
      * about 1 GB/s into video memory (13% of the game thread); the GPU reading 3 MB a frame from RAM costs nothing. */
     snprintf(cfg, sizeof cfg, "d3d9.cachedWriteOnlyBuffers = True; d3d9.presentInterval = %d; d3d9.maxFrameRate = %d",
              getenv("USF_VSYNC") && !getenv("USF_NOVSYNC") ? 1 : 0, fps > 0 ? fps : 0);
+    {   /* Show FPS (the launcher's Options): DXVK's own counter, the frames actually presented (with frameskip on,
+         * the picture's rate, not the game's steps); larger on a phone's screen */
+        int port_setting(const char *key, int def);
+        if (port_setting("showfps", 0)) {
+            size_t n = strlen(cfg);
+#ifdef __ANDROID__
+            snprintf(cfg + n, sizeof cfg - n, "; dxvk.hud = fps,scale=1.5");
+#else
+            snprintf(cfg + n, sizeof cfg - n, "; dxvk.hud = fps");
+#endif
+        }
+    }
     setenv("DXVK_CONFIG", cfg, 0);
     /* dxvk-native 1.9.2b (Android) reads no DXVK_CONFIG, only a file (DXVK_CONFIG_FILE or ./dxvk.conf): without it
      * the game's own vsync request won (FIFO), so any frame over 16.7 ms waited for the next vblank (30 fps on a

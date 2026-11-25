@@ -487,7 +487,8 @@ const uint8_t *touch_picture(int w, int h, int *changed) {
             sprite(ART_STICK_KNOB, bx[NB] * w, by[NB] * h, STICK_R * s * h * 0.42f, alpha, 0);
         }
     }
-    if (set.showfps) text(fps_text, w * 0.035f, h * 0.955f, fmaxf(2.0f, (float)h / 280.0f), 0xF8F8F8u, 0.9f);
+    int dxb_enabled(void);
+    if (set.showfps && !dxb_enabled()) text(fps_text,     /* (with DXVK its own counter shows: dxvk_bridge.c) */ w * 0.035f, h * 0.955f, fmaxf(2.0f, (float)h / 280.0f), 0xF8F8F8u, 0.9f);
     for (int k = 0; k < 10 && set.on && !menu_open && !editing; k++)        /* the stick under the thumb */
         if (fingers[k].id && fingers[k].role == 1) {
             float r = 0.13f * s * (float)h;
