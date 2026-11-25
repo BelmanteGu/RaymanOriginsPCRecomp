@@ -75,7 +75,7 @@ final class GameMenu extends View {
         setBackgroundColor(inGame ? 0x99000000 : Color.BLACK);
         DisplayMetrics m = c.getResources().getDisplayMetrics();
         int sw = Math.max(m.widthPixels, m.heightPixels), sh = Math.min(m.widthPixels, m.heightPixels);
-        for (int h : new int[] {Math.min(sh, 1440), 1080, 900, 810, 720, 630, 540, 480, 432, 360}) {
+        for (int h : new int[] {Math.min(sh, 1440), 1080, 900, 810, 720, 630, 540, 480, 432, 360, 300, 270}) {
             String r = ((sw * h / sh) & ~7) + " x " + h;
             if (h <= sh && !res.contains(r)) res.add(r);
         }

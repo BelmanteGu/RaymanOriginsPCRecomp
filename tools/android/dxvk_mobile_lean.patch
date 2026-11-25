@@ -1,0 +1,42 @@
+--- a/src/dxso/dxso_compiler.cpp
++++ b/src/dxso/dxso_compiler.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "dxso_compiler.h"
+ 
+ #include "dxso_analysis.h"
+@@ -2540,6 +2541,12 @@
+     this->emitDstStore(dst, result, ctx.dst.mask, ctx.dst.saturate, emitPredicateLoad(ctx), ctx.dst.shift, ctx.dst.id);
+   }
+ 
++  // DXVK_LEAN_SAMPLING=1 (Rayman Origins PC port): see emitTextureSample
++  static bool leanSampling() {
++    static const bool lean = [] { const char* e = std::getenv("DXVK_LEAN_SAMPLING"); return e && *e && *e != '0'; }();
++    return lean;
++  }
++
+   void DxsoCompiler::emitTextureSample(const DxsoInstructionContext& ctx) {
+     DxsoRegisterPointer dst = emitGetOperandPtr(ctx.dst);
+ 
+@@ -2785,8 +2792,11 @@
+         }
+       }
+ 
++      // DXVK_LEAN_SAMPLING=1 (Rayman Origins PC port, weak mobile GPUs): no fetch4 path and no depth-compare
++      // variant: each sample is one plain sample (a game that never uses either; the picture is the same)
++      const bool lean = leanSampling();
+       uint32_t fetch4 = 0;
+-      if (m_programInfo.type() == DxsoProgramType::PixelShader && samplerType != SamplerTypeTexture3D) {
++      if (!lean && m_programInfo.type() == DxsoProgramType::PixelShader && samplerType != SamplerTypeTexture3D) {
+         fetch4 = m_module.opBitFieldUExtract(
+           m_module.defIntType(32, 0), m_ps.fetch4Spec,
+           m_module.consti32(samplerIdx), m_module.consti32(1));
+@@ -2879,7 +2889,7 @@
+     auto SampleType = [&](DxsoSamplerType samplerType) {
+       // Only do the check for depth comp. samplers
+       // if we aren't a 3D texture
+-      if (samplerType != SamplerTypeTexture3D) {
++      if (!leanSampling() && samplerType != SamplerTypeTexture3D) {
+         uint32_t colorLabel  = m_module.allocateId();
+         uint32_t depthLabel  = m_module.allocateId();
+         uint32_t endLabel    = m_module.allocateId();

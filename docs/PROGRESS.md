@@ -492,3 +492,11 @@ Options (the default is unchanged for strong phones):
   Mali-G52/G57, PowerVR 540; else 720.
 - Game files and GPU driver are choices in the launcher's own look (planks over the menu, touch or pad); GPU driver
   has "System driver (Turnip off)" and Turnip (downloaded once, then switched on and off without downloading).
+
+**Lean sampling** (tools/android/dxvk_mobile_lean.patch, on by default: `DXVK_LEAN_SAMPLING=0` turns it off): DXVK's
+D3D9 shader compiler wrapped every texture read in a fetch4 path (a second read, OpImageGather, plus a size query)
+and a depth-compare variant, chosen by specialization constants. The Adreno 610's driver did not drop them: the
+sprite shader read its texture twice per pixel. Without them (this game uses neither: the same picture on the PC),
+the sprite shader is 313 SPIR-V operations with one read instead of 348 with two plus a gather, and the Redmi 10C's
+level went from ~27.5 to **~35.5 fps** (no frameskip, more draws on screen than in the earlier run). Resolutions
+also down to 300 and 270 lines.

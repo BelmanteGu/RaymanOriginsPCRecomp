@@ -52,6 +52,10 @@ int dxb_enabled(void) {
     else snprintf(path, sizeof path, "%s/private/deps/dxvk/build-native/src/d3d9/libdxvk_d3d9.so.0", g_repo_dir);
 #endif
     setenv("DXVK_WSI_DRIVER", "SDL3", 0);
+    /* every texture read one plain read: no fetch4 path, no depth-compare variant (the game uses neither; the same
+     * picture). On a Redmi 10C (Adreno 610) the levels went from ~27.5 to ~35.5 fps: the driver did not drop the
+     * unused paths. DXVK_LEAN_SAMPLING=0 brings them back (tools/android/dxvk_mobile_lean.patch). */
+    setenv("DXVK_LEAN_SAMPLING", "1", 0);
     /* the game asks for immediate presentation and runs as fast as it can (uneven 40-90 fps on a fast GPU). Vsync is
      * no cure on a 144 Hz panel (60 does not divide 144: frames alternate 14 and 21 ms), so DXVK's frame limiter
      * paces the frames to USF_FPS (default 60; 0 = uncapped), presenting without waiting for the vblank (on Wayland
