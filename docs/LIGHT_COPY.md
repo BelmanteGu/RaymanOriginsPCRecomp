@@ -1,8 +1,8 @@
-# The light copy of the game (2.4 GB → 0.6 GB)
+# The light copy of the game (2.4 GB → 560 MB)
 
 The Steam copy of Rayman Origins takes 2.37 GB. Most of it is sound kept uncompressed. The light copy keeps
-everything else byte for byte and stores the sounds as Opus. It takes **0.59 GB**, and the game cannot tell the two
-apart.
+everything else byte for byte and stores the sounds as Opus. It takes **560 MB** (the archive 473 MB), and the game
+cannot tell the two apart.
 
 | Part | Steam copy | Light copy | How |
 |---|---|---|---|

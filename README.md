@@ -38,12 +38,33 @@ This one starts from the **PC build** because that is the copy people can still 
 | ✅ **Sound and movies** | XAudio2 (PCM, MS ADPCM); Bink movies through FFmpeg, with their soundtrack |
 | ✅ **Touch** | on-screen controls and the port's settings drawn in the game (under the game's pause menu) |
 | ✅ **Android** | runs on the Galaxy S23 (arm64, DXVK for Vulkan 1.1), touch controls with the Xbox 360 port's drawings |
-| ✅ **Light copy** | the game in 0.6 GB instead of 2.4 GB (sounds as Opus, the rest byte for byte): [docs/LIGHT_COPY.md](docs/LIGHT_COPY.md) |
+| ✅ **Light copy** | the game in 560 MB instead of 2.4 GB (sounds as Opus, the rest byte for byte): [docs/LIGHT_COPY.md](docs/LIGHT_COPY.md) |
 | ✅ **Controllers** | any SDL gamepad (USB / Bluetooth) as an XInput pad, plugged before or after start |
 
 Download (Android): [release 1.0](https://github.com/BelmanteGu/RaymanOriginsPCRecomp/releases/tag/v1.0) ·
 Log: [docs/PROGRESS.md](docs/PROGRESS.md) · Android: [docs/ANDROID.md](docs/ANDROID.md) · plan:
 [docs/PLAN.md](docs/PLAN.md) · rules: [docs/RULES.md](docs/RULES.md)
+
+## The light copy: 2.4 GB → 560 MB
+
+The Steam copy takes 2.37 GB, 1.67 GB of it sounds stored uncompressed. The light copy stores the sounds as Opus
+(96 kb/s stereo, 64 kb/s mono: not to be told apart by ear, same length to the sample, loops exact), packs the other
+uncompressed files losslessly, keeps everything else byte for byte and leaves out the attract-mode movie. The game
+reads it as if it were the original archive.
+
+| | Steam copy | Light copy |
+|---|---|---|
+| `GameData/bundle_PC.ipk` → `bundle_PC.lite` | 2,093 MB | 473 MB |
+| movies (intro, ending, sample) + program | 276 MB | 114 MB |
+| **total** | **2.37 GB** | **587 MB** (560 MiB, as phones and `du` show it) |
+
+- **Android:** nothing to do. The launcher makes it once, when the game folder is chosen or at the first Play (about a
+  minute on a Galaxy S23), and plays from it. A .zip of the light copy can be kept and imported again later
+  (Game files → .zip file), with no new compression.
+- **PC:** `sh tools/lite/make_light.sh "<Steam game folder>"` makes it, checks it against the original archive
+  (`wrong 0`) and zips it for the phone.
+
+Step by step and how it works: [docs/LIGHT_COPY.md](docs/LIGHT_COPY.md).
 
 ## Playing on the PC (Linux)
 
