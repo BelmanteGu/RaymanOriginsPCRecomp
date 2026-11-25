@@ -35,7 +35,7 @@ import java.util.List;
  * into the app's folder); with a game: PLAY and CHANGE GAME FILES. Touch or a pad (up/down, A/Enter, B/Back).
  */
 public class LauncherActivity extends Activity {
-    private static final int REQ_FOLDER = 1, REQ_ZIP = 2;
+    private static final int REQ_FOLDER = 1, REQ_ZIP = 2, REQ_DRIVER = 3;
 
     private MenuStyle st;
     private LinearLayout menu;
@@ -240,28 +240,45 @@ public class LauncherActivity extends Activity {
         });
     }
 
-    /** The Vulkan driver (GpuDrivers): the system's (Turnip off), or Turnip downloaded once from GitHub (Adreno). */
+    /** The Vulkan driver (GpuDrivers): the system's, a driver unpacked earlier, one of the catalog's downloaded
+     *  from GitHub, or a driver .zip of the player's (meta.json + .so). Adreno only; a driver that never draws sends
+     *  the game back to the system's. */
     private void pickDriver() {
         String sel = GpuDrivers.selected(this), failed = GpuDrivers.failed(this);
-        boolean have = GpuDrivers.installed(this, "turnip");
-        String[] items = {"System driver (Turnip off)", have ? "Turnip" : "Turnip (download from GitHub)"};
-        game.choose("GPU driver", failed != null ? "The last driver did not work; the system driver was used." : null, items,
-                sel == null ? 0 : 1, w -> {
-            if (w == 0) { GpuDrivers.useSystem(this); android.widget.Toast.makeText(this, game.text("System driver"), android.widget.Toast.LENGTH_SHORT).show(); }
-            else if (w == 1 && have) { GpuDrivers.use(this, "turnip"); android.widget.Toast.makeText(this, game.text("Turnip installed"), android.widget.Toast.LENGTH_SHORT).show(); }
-            else if (w == 1) {
-                String label = game.text("Downloading the Turnip driver");
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> acts = new java.util.ArrayList<>();
+        labels.add("System driver (Turnip off)");
+        acts.add(() -> { GpuDrivers.useSystem(this); toast(game.text("System driver")); });
+        int mark = 0;
+        for (String f : GpuDrivers.installedFolders(this)) {
+            if (f.equals(sel)) mark = labels.size();
+            labels.add(GpuDrivers.displayName(this, f));
+            acts.add(() -> { GpuDrivers.use(this, f); toast(GpuDrivers.displayName(this, f)); });
+        }
+        for (GpuDrivers.Known k : GpuDrivers.CATALOG) {
+            if (GpuDrivers.installed(this, k.folder)) continue;
+            labels.add(game.text("Download") + ": " + k.name);
+            acts.add(() -> {
+                String label = game.text("Downloading") + " " + k.name;
                 game.showBusy(label);
                 new Thread(() -> {
-                    String err = GpuDrivers.downloadTurnip(this, t -> runOnUiThread(() -> game.showBusy(label + "  " + t)));
-                    runOnUiThread(() -> {
-                        game.showBusy(null);
-                        android.widget.Toast.makeText(this, err != null ? err : game.text("Turnip installed"), android.widget.Toast.LENGTH_LONG).show();
-                    });
+                    String err = GpuDrivers.download(this, k, t -> runOnUiThread(() -> game.showBusy(label + "  " + t)));
+                    runOnUiThread(() -> { game.showBusy(null); toast(err != null ? err : k.name); });
                 }).start();
-            }
+            });
+        }
+        labels.add("Import driver (.zip)");
+        acts.add(() -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("application/zip");
+            i.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {"application/zip", "application/x-zip-compressed", "application/octet-stream"});
+            startActivityForResult(i, REQ_DRIVER);
         });
+        game.choose("GPU driver", failed != null ? "The last driver did not work; the system driver was used." : null,
+                labels.toArray(new String[0]), sel == null ? 0 : mark, w -> { if (w >= 0) acts.get(w).run(); });
     }
+    private void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show(); }
 
     private void pickZip() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -293,6 +310,13 @@ public class LauncherActivity extends Activity {
             String path = treeToPath(data.getData());
             if (isGame(path)) { prefs().edit().putString("game", path).apply(); status.setText(""); selected = 0; showMenu(); }
             else status.setText("Rayman Origins.exe is not in " + path + ". Select the game's own folder.");
+        } else if (req == REQ_DRIVER && game != null) {
+            Uri u = data.getData();
+            game.showBusy(game.text("GPU driver"));
+            new Thread(() -> {
+                String err = GpuDrivers.importZip(this, u);
+                runOnUiThread(() -> { game.showBusy(null); toast(err != null ? err : game.text("GPU driver") + " OK"); });
+            }).start();
         } else if (req == REQ_ZIP && game != null) {
             importZipGame(data.getData());
         } else if (req == REQ_ZIP) {

@@ -24,6 +24,9 @@ final class MenuText {
         m.put("Frameskip", new String[] {"Saut d'images", "Frameskip", "Salto de cuadros", "Salto fotogrammi", "Frameskip", "Pular quadros", "Pomijanie klatek", "Пропуск кадров"});
         m.put("System driver (Turnip off)", new String[] {"Pilote du système (Turnip désactivé)", "System-Treiber (Turnip aus)", "Controlador del sistema (Turnip desactivado)", "Driver di sistema (Turnip spento)", "Systeemdriver (Turnip uit)", "Driver do sistema (Turnip desligado)", "Sterownik systemowy (Turnip wył.)", "Системный драйвер (Turnip выкл.)"});
         m.put("Turnip", new String[] {"Turnip", "Turnip", "Turnip", "Turnip", "Turnip", "Turnip", "Turnip", "Turnip"});
+        m.put("Download", new String[] {"Télécharger", "Laden", "Descargar", "Scarica", "Downloaden", "Baixar", "Pobierz", "Скачать"});
+        m.put("Downloading", new String[] {"Téléchargement de", "Lade", "Descargando", "Download di", "Downloaden", "Baixando", "Pobieranie", "Загрузка"});
+        m.put("Import driver (.zip)", new String[] {"Importer un pilote (.zip)", "Treiber importieren (.zip)", "Importar controlador (.zip)", "Importa driver (.zip)", "Driver importeren (.zip)", "Importar driver (.zip)", "Importuj sterownik (.zip)", "Импорт драйвера (.zip)"});
         m.put("Play", new String[] {"Jouer", "Spielen", "Jugar", "Gioca", "Spelen", "Jogar", "Graj", "Играть"});
         m.put("Options", new String[] {"Options", "Optionen", "Opciones", "Opzioni", "Opties", "Opções", "Opcje", "Настройки"});
         m.put("Game files", new String[] {"Fichiers du jeu", "Spieldateien", "Archivos del juego", "File di gioco", "Spelbestanden", "Arquivos do jogo", "Pliki gry", "Файлы игры"});

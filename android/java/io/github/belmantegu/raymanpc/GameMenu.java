@@ -136,18 +136,19 @@ final class GameMenu extends View {
         p.setColor(0xEE000000);
         c.drawRect(0, 0, MenuArt.W, MenuArt.H, p);
         hit(0, 0, MenuArt.W, MenuArt.H, () -> choiceDone(-1));     /* outside the planks: back */
-        float top = 300 - (choiceItems.length - 2) * 30;
+        float step = Math.min(140, 720f / Math.max(1, choiceItems.length)), ph = Math.min(132, step - 8);
+        float top = Math.max(110, 300 - (choiceItems.length - 2) * 30);
         art.text(c, choiceTitle, 0.7f, WHITE, 1170, top, SHADOW);
         if (choiceMsg != null) art.text(c, choiceMsg, 0.36f, ORANGE, 1170, top + 70, SHADOW);
         android.graphics.Bitmap plank = art.tex.get("settingsbackbut");
         for (int i = 0; i < choiceItems.length; i++) {
-            float y = top + 180 + i * 140;
+            float y = top + 180 + i * step;
             boolean on = i == choiceSel;
-            if (plank != null) art.image(c, plank, 1170 - 460, y - 66, 920, 132);
+            if (plank != null) art.image(c, plank, 1170 - 460, y - ph / 2, 920, ph);
             String s = (i == choiceMark ? "> " : "") + choiceItems[i];      /* (the game's font has no tick) */
             art.text(c, s, on ? 0.5f : 0.46f, on ? WHITE : ORANGE, 1170, y, SHADOW);
             final int k = i;
-            hit(1170 - 460, y - 66, 1170 + 460, y + 66, () -> { if (choiceSel == k) choiceDone(k); else choiceSel = k; });
+            hit(1170 - 460, y - ph / 2, 1170 + 460, y + ph / 2, () -> { if (choiceSel == k) choiceDone(k); else choiceSel = k; });
         }
     }
 

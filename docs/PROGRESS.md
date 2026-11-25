@@ -510,3 +510,8 @@ also down to 300 and 270 lines.
   the surface is made with the instance's own vkCreateAndroidSurfaceKHR (SDL's would come from the system's
   libvulkan, not from Turnip). Checked by the user on the Redmi 10C.
 - **Show FPS** is DXVK's own counter now (`dxvk.hud = fps`, scale 1.5 on a phone): the frames actually presented.
+
+GPU driver is a list now: the system's (Turnip off), the drivers already unpacked (switched with a touch), the
+catalog's still to download (Turnip 26.3 R6, recommended and checked on the Adreno 610; Turnip 27.0 R3;
+Mr. Purple T30, Android 11+) and "Import driver (.zip)" for any pack of the player's (meta.json + .so, the
+Winlator / Yuzu format), unpacked into its own folder. Long lists fit the screen (planks closer together).

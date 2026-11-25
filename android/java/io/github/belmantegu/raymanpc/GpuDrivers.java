@@ -27,7 +27,82 @@ final class GpuDrivers {
      *  added it in software), and DXVK needs 1.1; with 26.3 the 610 is Vulkan 1.3 with BC textures. */
     static final String TURNIP_URL = "https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/download/v37/Turnip_v26.3.0-R6.zip";
 
+    /** drivers the launcher can download (the adrenotools pack format), the first one recommended */
+    static final class Known {
+        final String folder, name, url;
+        Known(String folder, String name, String url) { this.folder = folder; this.name = name; this.url = url; }
+    }
+    static final Known[] CATALOG = {
+        new Known("turnip", "Turnip 26.3 R6", TURNIP_URL),
+        new Known("turnip27", "Turnip 27.0 R3", "https://github.com/StevenMXZ/Adreno-Tools-Drivers/releases/download/v40/Turnip_v27.0.0-R3.zip"),
+        new Known("purple30", "Turnip Mr. Purple T30 (Android 11+)",
+                  "https://github.com/MrPurple666/purple-turnip/releases/download/vturnip_mrpurple_T30-toasted.adpkg/turnip_mrpurple_T30-toasted.adpkg.zip"),
+    };
+
     interface Progress { void at(String text); }
+
+    /** the drivers unpacked in files/gpu_drivers/ (folders with a library), catalog ones first */
+    static java.util.List<String> installedFolders(Context c) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (Known k : CATALOG) if (installed(c, k.folder)) out.add(k.folder);
+        String[] names = root(c).list();
+        if (names != null) {
+            java.util.Arrays.sort(names);
+            for (String n : names) if (!out.contains(n) && new File(root(c), n).isDirectory() && installed(c, n)) out.add(n);
+        }
+        return out;
+    }
+    /** what a driver is called: its meta.json name, else its folder */
+    static String displayName(Context c, String folder) {
+        for (Known k : CATALOG) if (k.folder.equals(folder)) return k.name;
+        try {
+            String n = new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(new File(root(c), folder), "meta.json").toPath()), "UTF-8")).optString("name", "");
+            if (!n.isEmpty()) return n;
+        } catch (Exception ignored) {}
+        return folder;
+    }
+    /** downloads a catalog driver and selects it; null, or what went wrong */
+    static String download(Context c, Known k, Progress p) {
+        try {
+            File zip = new File(c.getCacheDir(), "driver.zip");
+            download(k.url, zip, p, k.name);
+            String folder = install(c, zip, k.folder);
+            zip.delete();
+            return folder == null ? "The driver zip has no library." : null;
+        } catch (Exception e) {
+            return "Could not download the driver: " + e.getMessage();
+        }
+    }
+    /** a driver zip of the player's (meta.json + .so, the format of Winlator / Yuzu packs): its own folder, selected */
+    static String importZip(Context c, android.net.Uri uri) {
+        try {
+            File zip = new File(c.getCacheDir(), "driver_import.zip");
+            try (InputStream in = c.getContentResolver().openInputStream(uri); OutputStream o = new FileOutputStream(zip)) {
+                byte[] b = new byte[1 << 16];
+                int n;
+                while ((n = in.read(b)) > 0) o.write(b, 0, n);
+            }
+            String name = "driver";
+            try (InputStream in = new java.io.FileInputStream(zip); ZipInputStream z = new ZipInputStream(in)) {
+                ZipEntry e;
+                while ((e = z.getNextEntry()) != null)
+                    if (new File(e.getName()).getName().equalsIgnoreCase("meta.json")) {
+                        ByteArrayOutputStream o = new ByteArrayOutputStream();
+                        byte[] b = new byte[4096];
+                        int n;
+                        while ((n = z.read(b)) > 0) o.write(b, 0, n);
+                        name = new JSONObject(o.toString("UTF-8")).optString("name", name);
+                        break;
+                    }
+            }
+            String folder = "user_" + name.replaceAll("[^A-Za-z0-9._-]", "_");
+            String r = install(c, zip, folder);
+            zip.delete();
+            return r == null ? "The zip has no driver library (.so)." : null;
+        } catch (Exception e) {
+            return "Could not import the driver: " + e.getMessage();
+        }
+    }
 
     static File root(Context c) { File r = new File(c.getFilesDir(), "gpu_drivers"); r.mkdirs(); return r; }
 
@@ -54,6 +129,8 @@ final class GpuDrivers {
             String lib = new JSONObject(new String(java.nio.file.Files.readAllBytes(new File(dir, "meta.json").toPath()), "UTF-8")).optString("libraryName", null);
             if (lib != null && new File(dir, lib).exists()) return lib;
         } catch (Exception ignored) {}
+        String[] in = dir.list();                                   /* (a library renamed on install, or no name) */
+        if (in != null) for (String n : in) if (n.endsWith(".so")) return n;
         return null;
     }
     /** selects a driver already unpacked (Turnip back on, without downloading it again) */
