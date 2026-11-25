@@ -36,4 +36,10 @@ The launcher only finds the game. Everything else happens in the game, by touch:
 - the **resolution** is in the game's own Options; on the phone its list is the screen's shape at its full height and
   at 900, 720 and 540 lines (720 by default).
 
+**GPU driver** (Adreno only): Game files → GPU driver lists the system's driver (Turnip off), the drivers already
+installed, Turnip builds to download from GitHub (Turnip 26.3 R6 recommended: on an Adreno 610 only Mesa 26.3 or
+newer works) and "Import driver (.zip)" for a pack of one's own (meta.json + the .so, the Winlator / Yuzu format).
+The choice applies at the next start; a driver that never draws sends the game back to the system's at the start
+after, and the launcher says so.
+
 A physical controller works too (any SDL gamepad, read by the game as an XInput pad).
