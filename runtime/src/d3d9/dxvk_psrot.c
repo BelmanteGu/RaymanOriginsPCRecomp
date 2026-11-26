@@ -56,3 +56,27 @@ void psrot_frame(void) {
     t_win = now;
     window = 0;
 }
+
+/* USF_RSLOG=1 (analysis): which fixed-function features the game's draws use (DXVK builds every pixel shader with
+ * fog, alpha test, point sprites, clip planes and sRGB writes behind specialization constants; a driver that does not
+ * fold them pays for them all). Every 5 s: of the draws, how many had each one on, and how many had no pixel shader. */
+static uint32_t rs[256], rs_draws, rs_on[6], rs_noshader;
+static double rs_t0;
+static int rs_log = -1;
+void rslog_state(uint32_t state, uint32_t value) { if (state < 256) rs[state] = value; }
+void rslog_draw(uint32_t ps) {
+    if (rs_log < 0) rs_log = getenv("USF_RSLOG") != NULL;
+    if (!rs_log) return;
+    static const uint32_t st[6] = {28, 15, 156, 152, 194, 27};   /* fog, alpha test, point sprite, clip, sRGB, blend */
+    rs_draws++;
+    for (int i = 0; i < 6; i++) if (rs[st[i]]) rs_on[i]++;
+    if (!ps) rs_noshader++;
+    double now = ms_now();
+    if (!rs_t0) rs_t0 = now;
+    if (now - rs_t0 < 5000) return;
+    fprintf(stderr, "usf: rslog: %u draws: fog %u, alpha test %u (func %u ref %u), point sprite %u, clip planes %u, sRGB write %u, blend %u, no pixel shader %u\n",
+            rs_draws, rs_on[0], rs_on[1], rs[25], rs[24], rs_on[2], rs_on[3], rs_on[4], rs_on[5], rs_noshader);
+    rs_draws = rs_noshader = 0;
+    for (int i = 0; i < 6; i++) rs_on[i] = 0;
+    rs_t0 = now;
+}

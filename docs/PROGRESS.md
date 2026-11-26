@@ -515,3 +515,12 @@ GPU driver is a list now: the system's (Turnip off), the drivers already unpacke
 catalog's still to download (Turnip 26.3 R6, recommended and checked on the Adreno 610; Turnip 27.0 R3;
 Mr. Purple T30, Android 11+) and "Import driver (.zip)" for any pack of the player's (meta.json + .so, the
 Winlator / Yuzu format), unpacked into its own folder. Long lists fit the screen (planks closer together).
+
+## 2026-11-26 — DXVK for weak mobile GPUs, step 1: shaders without unused fixed-function
+
+`USF_RSLOG=1` (dxvk_psrot.c) counts, every 5 s, the draws with each fixed-function feature on. In a level: ~22,000
+draws, **none** with fog, alpha test, point sprites, clip planes or sRGB writes; all blended, all with a pixel shader.
+DXVK still built each of them into every shader behind specialization constants (the Adreno driver did not fold the
+fetch4 path away: lean sampling showed it). `DXVK_LEAN_FF=1` (tools/android/dxvk_mobile_lean_ff.patch, on by default
+with lean sampling) leaves them out: the sprite shader goes from 313 SPIR-V operations with an OpKill and 6
+branches to ~190 with neither; the same picture on the PC.

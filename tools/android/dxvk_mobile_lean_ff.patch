@@ -1,0 +1,55 @@
+--- a/src/dxso/dxso_compiler.cpp
++++ b/src/dxso/dxso_compiler.cpp
+@@ -2541,6 +2541,14 @@
+     this->emitDstStore(dst, result, ctx.dst.mask, ctx.dst.saturate, emitPredicateLoad(ctx), ctx.dst.shift, ctx.dst.id);
+   }
+ 
++  // DXVK_LEAN_FF=1 (Rayman Origins PC port, weak mobile GPUs): shaders without the fixed-function features the game
++  // never turns on: fog, alpha test (and its OpKill), point sprites, user clip planes. DXVK emits them in every shader
++  // behind specialization constants, and a mobile driver that does not fold those pays for them in every pixel.
++  static bool leanFixedFunction() {
++    static const bool lean = [] { const char* e = std::getenv("DXVK_LEAN_FF"); return e && *e && *e != '0'; }();
++    return lean;
++  }
++
+   // DXVK_LEAN_SAMPLING=1 (Rayman Origins PC port): see emitTextureSample
+   static bool leanSampling() {
+     static const bool lean = [] { const char* e = std::getenv("DXVK_LEAN_SAMPLING"); return e && *e && *e != '0'; }();
+@@ -3199,7 +3207,7 @@
+     uint32_t pointCoord = 0;
+     D3D9PointSizeInfoPS pointInfo;
+ 
+-    if (m_programInfo.type() == DxsoProgramType::PixelShader) {
++    if (m_programInfo.type() == DxsoProgramType::PixelShader && !leanFixedFunction()) {
+       pointCoord = GetPointCoord(m_module, m_entryPointInterfaces);
+       pointInfo  = GetPointSizeInfoPS(m_module, m_rsBlock);
+     }
+@@ -3289,7 +3297,7 @@
+ 
+       // We need to replace TEXCOORD inputs with gl_PointCoord
+       // if D3DRS_POINTSPRITEENABLE is set.
+-      if (m_programInfo.type() == DxsoProgramType::PixelShader && elem.semantic.usage == DxsoUsage::Texcoord)
++      if (m_programInfo.type() == DxsoProgramType::PixelShader && elem.semantic.usage == DxsoUsage::Texcoord && !leanFixedFunction())
+         workingReg.id = m_module.opSelect(getVectorTypeId(workingReg.type), pointInfo.isSprite, pointCoord, workingReg.id);
+ 
+       if (m_programInfo.type() == DxsoProgramType::PixelShader && elem.semantic.usage == DxsoUsage::Color) {
+@@ -3765,7 +3773,8 @@
+       m_vs.functionId, 0, nullptr);
+     this->emitLinkerOutputSetup();
+ 
+-    this->emitVsClipping();
++    if (!leanFixedFunction())
++      this->emitVsClipping();
+ 
+     this->emitFunctionEnd();
+   }
+@@ -3848,7 +3857,8 @@
+     // No need to setup output here as it's non-indexable
+     // everything has already gone to the right place!
+ 
+-    this->emitPsProcessing();
++    if (!leanFixedFunction())
++      this->emitPsProcessing();
+     this->emitOutputDepthClamp();
+     this->emitFunctionEnd();
+   }

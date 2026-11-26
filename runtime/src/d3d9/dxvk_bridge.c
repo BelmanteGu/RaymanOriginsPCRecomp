@@ -56,6 +56,7 @@ int dxb_enabled(void) {
      * picture). On a Redmi 10C (Adreno 610) the levels went from ~27.5 to ~35.5 fps: the driver did not drop the
      * unused paths. DXVK_LEAN_SAMPLING=0 brings them back (tools/android/dxvk_mobile_lean.patch). */
     setenv("DXVK_LEAN_SAMPLING", "1", 0);
+    setenv("DXVK_LEAN_FF", "1", 0);          /* no fog / alpha test / point sprites / clip planes: the game uses none */
     /* the game asks for immediate presentation and runs as fast as it can (uneven 40-90 fps on a fast GPU). Vsync is
      * no cure on a 144 Hz panel (60 does not divide 144: frames alternate 14 and 21 ms), so DXVK's frame limiter
      * paces the frames to USF_FPS (default 60; 0 = uncapped), presenting without waiting for the vblank (on Wayland
@@ -304,6 +305,8 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
         void psrot_set(uint32_t hash); int psrot_draw(void);
         if (slot == 107) { Wrap *p = dxb_of(ARG(1)); psrot_set(p ? p->code_hash : 0); }
         if (slot >= 81 && slot <= 84 && psrot_draw()) return 0;
+        void rslog_state(uint32_t, uint32_t); void rslog_draw(uint32_t); static uint32_t cur_ps;   /* USF_RSLOG */
+        if (slot == 57) rslog_state(ARG(1), ARG(2)); else if (slot == 107) cur_ps = ARG(1); else if (slot >= 81 && slot <= 84) rslog_draw(cur_ps);
     }
     if (w->type == DXB_DEVICE && slot == 107 && ARG(1)) {   /* USF_SIMPLE_PS=1 (experiment): every pixel shader a minimal one */
         static int simple = -1;
