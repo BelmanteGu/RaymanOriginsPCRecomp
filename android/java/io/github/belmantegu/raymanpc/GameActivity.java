@@ -23,6 +23,8 @@ public class GameActivity extends SDLActivity {
     static native void nativeSetFrozen(boolean on);
     static native void nativeReloadSettings();
     static native void nativeEditLayout();
+    /** the touch controls' own layer (dxvk_overlay.c): its Surface, or null when it goes away */
+    static native void nativeTouchSurface(android.view.Surface s);
 
     @Override
     protected String[] getLibraries() { return new String[] {"SDL3", "main"}; }
@@ -88,6 +90,27 @@ public class GameActivity extends SDLActivity {
             if (gm != null) gm.setGameState(new android.app.GameState(false, android.app.GameState.MODE_GAMEPLAY_UNINTERRUPTIBLE));
         }
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        addTouchLayer();
+    }
+
+    /* The touch controls on a layer of their own, above the game's surface and composed with it by the display
+     * hardware: the game's picture can stay at its own resolution (the compositor enlarges it, not the GPU) while the
+     * controls stay sharp at the screen's, and they are drawn only when they change (dxvk_overlay.c). Not clickable:
+     * the touches go on to SDL's surface under it. */
+    private void addTouchLayer() {
+        if (mLayout == null) return;
+        android.view.SurfaceView layer = new android.view.SurfaceView(this);
+        layer.setZOrderMediaOverlay(true);
+        layer.getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);
+        layer.setFocusable(false);
+        layer.setClickable(false);
+        layer.getHolder().addCallback(new android.view.SurfaceHolder.Callback() {
+            @Override public void surfaceCreated(android.view.SurfaceHolder h) { nativeTouchSurface(h.getSurface()); }
+            @Override public void surfaceChanged(android.view.SurfaceHolder h, int f, int w, int hh) { nativeTouchSurface(h.getSurface()); }
+            @Override public void surfaceDestroyed(android.view.SurfaceHolder h) { nativeTouchSurface(null); }
+        });
+        mLayout.addView(layer, new android.widget.RelativeLayout.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT));
     }
 
     /** from the game's thread: a touch button pressed with "Vibration" on */

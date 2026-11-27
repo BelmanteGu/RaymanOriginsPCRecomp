@@ -58,11 +58,16 @@ final class GameMenu extends View {
         {"Stick", "Floating", "Fixed"}, {"Run", "Toggle", "Hold"}, {"Vibration", "On", "Off"}, {"Pad hides", "On", "Off"},
         {"Show FPS", "Off", "On"}, {"Game files", "Change"}};
     private final List<String> res = new ArrayList<>();
+    /* quality modes (Display Options): each a resolution (the cost on weak GPUs is per pixel: on the Redmi 10C the title
+     * screen runs 60 fps at 252 lines, 36 at 540; smaller textures changed nothing). The resolution can still be
+     * changed by hand (the mode then reads "Custom"); frameskip is not part of them. */
+    private static final String[] MODES = {"Potato", "Low", "Medium", "High", "Max"};
+    private static final int[] MODE_LINES = {252, 360, 540, 720, 0};          /* 0: the screen's height */
     private final List<String> focus = new ArrayList<>();
     /* the settings: size 0 off / 1..3 S M L, rows[i] the chosen value of ROWS[i], res, volumes 0..10 */
-    private int size = 2, resIdx, music10 = 10, sfx10 = 10, frameskip = 1;
+    private int size = 2, resIdx, music10 = 10, sfx10 = 10, frameskip = 1, fsr = 0;
     private final int[] rows = new int[9];
-    private int[] savedRows; private int savedSize, savedRes, savedMusic, savedSfx, savedSkip;
+    private int[] savedRows; private int savedSize, savedRes, savedMusic, savedSfx, savedSkip, savedFsr;
 
     GameMenu(Context c, MenuArt art, Host host) { this(c, art, host, false); }
     GameMenu(Context c, MenuArt art, Host host, boolean inGame) {
@@ -75,13 +80,13 @@ final class GameMenu extends View {
         setBackgroundColor(inGame ? 0x99000000 : Color.BLACK);
         DisplayMetrics m = c.getResources().getDisplayMetrics();
         int sw = Math.max(m.widthPixels, m.heightPixels), sh = Math.min(m.widthPixels, m.heightPixels);
-        for (int h : new int[] {Math.min(sh, 1440), 1080, 900, 810, 720, 630, 540, 480, 432, 360, 300, 270}) {
+        for (int h : new int[] {Math.min(sh, 1440), 1080, 900, 810, 720, 630, 540, 480, 432, 360, 300, 270, 252}) {
             String r = ((sw * h / sh) & ~7) + " x " + h;
             if (h <= sh && !res.contains(r)) res.add(r);
         }
         focus.add("tabs");
         for (int i = 0; i < ROWS.length; i++) focus.add("row" + i);
-        for (String s : new String[] {"res", "frameskip", "music", "sfx", "accept", "cancel"}) focus.add(s);
+        for (String s : new String[] {"res", "frameskip", "fsr", "mode", "music", "sfx", "accept", "cancel"}) focus.add(s);
         if (inGame) focus.add("launcher");
         loadSettings();
     }
@@ -137,16 +142,22 @@ final class GameMenu extends View {
         c.drawRect(0, 0, MenuArt.W, MenuArt.H, p);
         hit(0, 0, MenuArt.W, MenuArt.H, () -> choiceDone(-1));     /* outside the planks: back */
         float step = Math.min(140, 720f / Math.max(1, choiceItems.length)), ph = Math.min(132, step - 8);
-        float top = Math.max(110, 300 - (choiceItems.length - 2) * 30);
+        float top = Math.max(60, 200 - (choiceItems.length - 2) * 30);
         art.text(c, choiceTitle, 0.7f, WHITE, 1170, top, SHADOW);
         if (choiceMsg != null) art.text(c, choiceMsg, 0.36f, ORANGE, 1170, top + 70, SHADOW);
         android.graphics.Bitmap plank = art.tex.get("settingsbackbut");
         for (int i = 0; i < choiceItems.length; i++) {
             float y = top + 180 + i * step;
             boolean on = i == choiceSel;
-            if (plank != null) art.image(c, plank, 1170 - 460, y - ph / 2, 920, ph);
-            String s = (i == choiceMark ? "> " : "") + choiceItems[i];      /* (the game's font has no tick) */
-            art.text(c, s, on ? 0.5f : 0.46f, on ? WHITE : ORANGE, 1170, y, SHADOW);
+            float gw = on ? 1010 : 920, gh = on ? ph + 18 : ph;       /* the item under the cursor: a bigger, outlined plank */
+            if (on && plank != null) {                                  /* a yellow outline in the plank's own shape */
+                android.graphics.Paint tint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+                tint.setColorFilter(new android.graphics.PorterDuffColorFilter(FOCUS, android.graphics.PorterDuff.Mode.SRC_IN));
+                c.drawBitmap(plank, null, new RectF(1170 - gw / 2 - 14, y - gh / 2 - 12, 1170 + gw / 2 + 14, y + gh / 2 + 12), tint);
+            }
+            if (plank != null) art.image(c, plank, 1170 - gw / 2, y - gh / 2, gw, gh);
+            String s = (i == choiceMark ? "> " : "") + choiceItems[i] + (i == choiceMark ? " <" : "");   /* (no tick in the font) */
+            art.text(c, s, on ? 0.56f : 0.46f, on ? WHITE : i == choiceMark ? 0xFFFFD040 : ORANGE, 1170, y, SHADOW);
             final int k = i;
             hit(1170 - 460, y - ph / 2, 1170 + 460, y + ph / 2, () -> { if (choiceSel == k) choiceDone(k); else choiceSel = k; });
         }
@@ -180,16 +191,17 @@ final class GameMenu extends View {
         for (int i = 0; i < res.size(); i++) if (res.get(i).endsWith(lines)) resIdx = i;
         music10 = get(kv, "music", 10); sfx10 = get(kv, "sfx", 10);
         frameskip = get(kv, "frameskip", 1) != 0 ? 1 : 0;
+        fsr = get(kv, "fsr", 0) != 0 ? 1 : 0;               /* FSR 1.0 EASU when the game is enlarged (dxvk_overlay.c) */
         remember();
     }
-    private void remember() { savedRows = rows.clone(); savedSize = size; savedRes = resIdx; savedMusic = music10; savedSfx = sfx10; savedSkip = frameskip; }
+    private void remember() { savedRows = rows.clone(); savedSize = size; savedRes = resIdx; savedMusic = music10; savedSfx = sfx10; savedSkip = frameskip; savedFsr = fsr; }
     private void saveSettings() {
         Map<String, String> kv = read();
         kv.put("touch", size > 0 ? "1" : "0"); kv.put("size", String.valueOf(Math.max(0, size - 1)));
         kv.put("opacity", String.valueOf(rows[2])); kv.put("lang", String.valueOf(rows[1])); kv.put("stick", String.valueOf(rows[3]));
         kv.put("runhold", String.valueOf(rows[4])); kv.put("vibration", rows[5] == 0 ? "1" : "0"); kv.put("padhides", rows[6] == 0 ? "1" : "0");
         kv.put("showfps", String.valueOf(rows[7])); kv.put("lines", res.get(resIdx).split(" x ")[1]);
-        kv.put("music", String.valueOf(music10)); kv.put("sfx", String.valueOf(sfx10)); kv.put("frameskip", String.valueOf(frameskip));
+        kv.put("music", String.valueOf(music10)); kv.put("sfx", String.valueOf(sfx10)); kv.put("frameskip", String.valueOf(frameskip)); kv.put("fsr", String.valueOf(fsr));
         StringBuilder b = new StringBuilder();
         for (Map.Entry<String, String> e : kv.entrySet()) b.append(e.getKey()).append('=').append(e.getValue()).append('\n');
         try (FileOutputStream o = new FileOutputStream(file())) { o.write(b.toString().getBytes(StandardCharsets.UTF_8)); } catch (Exception ignored) {}
@@ -291,7 +303,9 @@ final class GameMenu extends View {
         String on = focus.get(f);
         for (String[] p : new String[][] {{"settingscontrolsbg1", "ctrlhead"}, {"settingscontrolsbg2", "ctrllabels"}, {"settingscontrolsbg3", "ctrlvalues"},
             {"settingsdisplaybg", "display"}, {"settingssoundbg", "sound"}, {"settingsbackbut", "accept"}, {"settingsbackbut", "cancel"}})
-            art.image(c, p[0], art.box(p[1]));
+            art.image(c, p[0], p[1].equals("sound") || p[1].equals("accept") || p[1].equals("cancel") ? moved(art.box(p[1]), MODE_ROW, 0) : art.box(p[1]));
+        android.graphics.Bitmap modeBg = art.tex.get("settingssoundbg");          /* the Mode panel: a plank of its own */
+        if (modeBg != null) art.image(c, modeBg, 1043.7f, 368, 930.7f, 272);
         art.text(c, t("Touch Controls"), 0.5f, WHITE, 771, 222, SHADOW);
         art.text(c, t("Size"), 0.42f, on.equals("tabs") ? FOCUS : WHITE, 548, 274, SHADOW);
         for (int i = 0; i < 4; i++) {
@@ -319,28 +333,35 @@ final class GameMenu extends View {
         art.text(c, res.get(resIdx), 0.47f, WHITE, 1624, 297, 0xFF503808);
         hit(1396, 256, 1520, 334, () -> { f = focus.indexOf("res"); change(-1); });
         hit(1700, 256, 1852, 334, () -> { f = focus.indexOf("res"); change(1); });
-        boolean fs = on.equals("frameskip");                       /* frameskip: the game's own check box */
-        art.text(c, t("Frameskip"), 0.42f, fs ? FOCUS : WHITE, 1278, 372, SHADOW);
-        art.image(c, frameskip != 0 ? "settingswindowbutsel" : "settingswindowbut", art.box(frameskip != 0 ? "checkon" : "check"));
-        hit(1150, 330, 1880, 414, () -> { if (f == focus.indexOf("frameskip")) frameskip ^= 1; else f = focus.indexOf("frameskip"); });
-        art.text(c, t("Sound Options"), 0.5f, WHITE, 1509, 485, SHADOW);
+        /* one row, two of the game's own check boxes: Frameskip (left) and FSR 1.0 (right, where the box always was).
+         * FSR: the game's image enlarged with AMD FSR 1.0 EASU instead of bilinear; on a Galaxy Tab S6 Lite (Adreno 618)
+         * at 1280x720 the EASU pass was 85% of the GPU's shader work (36 fps with it, 49 without). */
+        boolean fs = on.equals("frameskip"), ff = on.equals("fsr");
+        art.text(c, t("Frameskip"), 0.42f, fs ? FOCUS : WHITE, 1262, 372, SHADOW);
+        art.image(c, frameskip != 0 ? "settingswindowbutsel" : "settingswindowbut", movedX(art.box(frameskip != 0 ? "checkon" : "check"), -310));
+        hit(1110, 330, 1540, 414, () -> { if (f == focus.indexOf("frameskip")) frameskip ^= 1; else f = focus.indexOf("frameskip"); });
+        art.text(c, "FSR 1.0", 0.42f, ff ? FOCUS : WHITE, 1648, 372, SHADOW);
+        art.image(c, fsr != 0 ? "settingswindowbutsel" : "settingswindowbut", art.box(fsr != 0 ? "checkon" : "check"));
+        hit(1560, 330, 1880, 414, () -> { if (f == focus.indexOf("fsr")) fsr ^= 1; else f = focus.indexOf("fsr"); });
+        drawModes(c, on.equals("mode"));
+        art.text(c, t("Sound Options"), 0.5f, WHITE, 1509, 485 + MODE_ROW, SHADOW);
         for (int i = 0; i < 2; i++) {
             String k = i == 0 ? "music" : "sfx";
             boolean fo = on.equals(k);
-            float y = 555 + i * 72;
+            float y = 555 + MODE_ROW + i * 72;
             art.text(c, t(i == 0 ? "Music Volume" : "SFX Volume"), 0.42f, fo ? WHITE : ORANGE, 1305, y, SHADOW);
-            art.image(c, fo ? "settingssliderbgsel" : "settingssliderbg", art.box(fo ? "slidersel" : "slider", i));
+            art.image(c, fo ? "settingssliderbgsel" : "settingssliderbg", moved(art.box(fo ? "slidersel" : "slider", i), MODE_ROW, 0));
             float v = (i == 0 ? music10 : sfx10) / 10f;
             android.graphics.Bitmap knob = art.tex.get(fo ? "settingsslidersel" : "settingsslider");
             org.json.JSONArray kb = art.box("knob", i);
-            if (knob != null && kb != null) art.image(c, knob, (float) (1474 + v * 346 - kb.optDouble(2) / 2 + 8), (float) kb.optDouble(1), (float) kb.optDouble(2), (float) kb.optDouble(3));
+            if (knob != null && kb != null) art.image(c, knob, (float) (1474 + v * 346 - kb.optDouble(2) / 2 + 8), (float) kb.optDouble(1) + MODE_ROW, (float) kb.optDouble(2), (float) kb.optDouble(3));
             final String key = k;
             hit(1460, y - 30, 1860, y + 35, () -> f = focus.indexOf(key));
         }
-        art.text(c, t("Accept"), 0.52f, on.equals("accept") ? WHITE : ORANGE, 1324, 758, SHADOW);
-        art.text(c, t("Cancel"), 0.52f, on.equals("cancel") ? WHITE : ORANGE, 1703, 758, SHADOW);
-        hit(1158, 720, 1490, 796, this::accept);
-        hit(1544, 722, 1862, 794, this::cancel);
+        art.text(c, t("Accept"), 0.52f, on.equals("accept") ? WHITE : ORANGE, 1324, 758 + MODE_ROW, SHADOW);
+        art.text(c, t("Cancel"), 0.52f, on.equals("cancel") ? WHITE : ORANGE, 1703, 758 + MODE_ROW, SHADOW);
+        hit(1158, 720 + MODE_ROW, 1490, 796 + MODE_ROW, this::accept);
+        hit(1544, 722 + MODE_ROW, 1862, 794 + MODE_ROW, this::cancel);
         if (inGame) {                                     /* back to the launcher: a plank like the brand's, on the right */
             org.json.JSONArray b = art.box("brand"), r = new org.json.JSONArray();   /* the brand's plank, moved right */
             try { for (int k = 0; k < 4; k++) r.put(k == 0 ? b.getDouble(0) + 1740 : b.getDouble(k)); } catch (Exception ignored) {}
@@ -349,16 +370,67 @@ final class GameMenu extends View {
             hit(1780, 960, 2300, 1044, host::toLauncher);
         }
     }
+    /* the Display panel one row taller for Mode: what is under it moves down by as much */
+    private static final int MODE_ROW = 196;
+    private static org.json.JSONArray movedX(org.json.JSONArray b, float dx) {
+        org.json.JSONArray r = new org.json.JSONArray();
+        if (b == null) return null;
+        try { for (int k = 0; k < 4; k++) r.put(b.getDouble(k) + (k == 0 ? dx : 0)); } catch (Exception ignored) {}
+        return r;
+    }
+    private static org.json.JSONArray moved(org.json.JSONArray b, float dy, float dh) {
+        org.json.JSONArray r = new org.json.JSONArray();
+        if (b == null) return null;
+        try { for (int k = 0; k < 4; k++) r.put(b.getDouble(k) + (k == 1 ? dy : k == 3 ? dh : 0)); } catch (Exception ignored) {}
+        return r;
+    }
+    /* the mode the resolution matches, or -1 (Custom) */
+    private int mode() {
+        int lines = Integer.parseInt(res.get(resIdx).split(" x ")[1]);
+        for (int i = 0; i < MODES.length; i++) {
+            int want = MODE_LINES[i] == 0 ? Integer.parseInt(res.get(0).split(" x ")[1]) : MODE_LINES[i];
+            if (lines == want) return i;
+        }
+        return -1;
+    }
+    private void setMode(int i) {
+        if (MODE_LINES[i] == 0) { resIdx = 0; return; }
+        for (int k = 0; k < res.size(); k++) if (res.get(k).endsWith(" " + MODE_LINES[i])) { resIdx = k; return; }
+        resIdx = res.size() - 1;                                   /* a screen too small for it: the lowest */
+    }
+    /* the modes as five planks side by side (the Size tabs' look), each with its icon and name */
+    private void drawModes(Canvas c, boolean focused) {
+        int m = mode();
+        art.text(c, t("Mode"), 0.5f, focused ? FOCUS : WHITE, 1509, 452, SHADOW);
+        if (m < 0) art.text(c, t("Custom"), 0.32f, FOCUS, 1800, 452, SHADOW);
+        if (inGame) {                     /* the mode (a resolution) takes effect when the game starts again */
+            boolean changed = resIdx != savedRes;
+            art.text(c, t("Restart the game to apply the mode"), 0.25f, changed ? FOCUS : 0xFFF8D8B8, 1509, 494, changed ? SHADOW : 0);
+        }
+        float w = 138, h = 150, top = inGame ? 480 : 470;
+        for (int i = 0; i < MODES.length; i++) {
+            float x = 1145 + i * 147;                                 /* centred on the panel's visible plank (1140-1876) */
+            boolean sel = i == m;
+            android.graphics.Bitmap b = art.tex.get(sel ? "settingsplayerbutsel" : "settingsplayerbut");
+            if (b != null) art.image(c, b, x, top, w, h);
+            /* the name, centred on the plank: its picture's opaque part is x 3-61, y 15-46 of 64 */
+            art.text(c, t(MODES[i]), 0.33f, sel ? WHITE : 0xFF5A1408, x + w * 32 / 64, top + h * 30.5f / 64 - 1, sel ? SHADOW : 0);
+            final int k = i;
+            hit(x, top + 30, x + w, top + 115, () -> { f = focus.indexOf("mode"); setMode(k); });
+        }
+    }
     private void change(int d) {
         String on = focus.get(f);
         if (on.equals("tabs")) size = (size + d + 4) % 4;
         else if (on.startsWith("row")) {
             int i = Integer.parseInt(on.substring(3));
-            if (i == 0) { size = 2; java.util.Arrays.fill(rows, 0); rows[2] = 1; resIdx = Math.min(2, res.size() - 1); music10 = sfx10 = 10; frameskip = 1; }
+            if (i == 0) { size = 2; java.util.Arrays.fill(rows, 0); rows[2] = 1; resIdx = Math.min(2, res.size() - 1); music10 = sfx10 = 10; frameskip = 1; fsr = 0; }
             else if (i == 8) { if (inGame) host.editLayout(); else host.pickFolder(); }
             else { int n = i == 1 ? LANGS.length : ROWS[i].length - 1; rows[i] = (rows[i] + d + n) % n; }
         } else if (on.equals("res")) resIdx = (resIdx + d + res.size()) % res.size();
         else if (on.equals("frameskip")) frameskip ^= 1;
+        else if (on.equals("fsr")) fsr ^= 1;
+        else if (on.equals("mode")) { int m = mode(); setMode(((m < 0 ? 2 : m) + d + MODES.length) % MODES.length); }
         else if (on.equals("music")) { music10 = Math.max(0, Math.min(10, music10 + d)); if (music != null) music.setVolume(music10 / 10f, music10 / 10f); }
         else if (on.equals("sfx")) sfx10 = Math.max(0, Math.min(10, sfx10 + d));
         else if (on.equals("accept")) accept();
@@ -367,7 +439,7 @@ final class GameMenu extends View {
     }
     private void accept() { saveSettings(); status = "Settings saved"; if (inGame) host.closeMenu(); else screen = 1; }
     private void cancel() {
-        System.arraycopy(savedRows, 0, rows, 0, rows.length); size = savedSize; resIdx = savedRes; music10 = savedMusic; sfx10 = savedSfx; frameskip = savedSkip;
+        System.arraycopy(savedRows, 0, rows, 0, rows.length); size = savedSize; resIdx = savedRes; music10 = savedMusic; sfx10 = savedSfx; frameskip = savedSkip; fsr = savedFsr;
         if (music != null) music.setVolume(music10 / 10f, music10 / 10f);
         status = "";
         if (inGame) host.closeMenu(); else screen = 1;

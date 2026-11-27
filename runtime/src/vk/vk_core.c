@@ -234,6 +234,9 @@ int r_init(uint32_t w, uint32_t h) {
     (void)w; (void)h;
     if (ready) return 0;
     if (!g_window) hle_fatal("r_init: no window yet");
+#ifdef __ANDROID__
+    { void gpu_boost_start(void); gpu_boost_start(); }   /* the Adreno out of its slow state (gpu_boost.c) */
+#endif
     Uint32 next = 0;
     const char *const *exts = SDL_Vulkan_GetInstanceExtensions(&next);
     VkApplicationInfo app = {VK_STRUCTURE_TYPE_APPLICATION_INFO};

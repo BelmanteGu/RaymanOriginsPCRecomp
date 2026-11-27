@@ -131,9 +131,13 @@ static uint32_t make_backbuffer(uint32_t pp) {
 
 /* Ultrawide (Hor+): UbiArt fits its cameras and screen rectangles to the 16/9, 9/16 pair at GAME_ASPECT_PAIR (game.h);
  * both become A and 1/A in guest memory, so the view gets wider and the 2D keeps its proportions (the engine places
- * it). USF_ASPECT: auto (the back buffer's shape when wider than 16:9; the default), 16:9 (the game as it was), 21:9,
+ * it). USF_ASPECT: auto (the back buffer's shape, 4:3 to 32:9; the default), 16:9 (the game as it was), 21:9,
  * 32:9, or a number. Nothing in the game's files changes. */
 float g_aspect = 16.0f / 9.0f;
+/* read by the game's two 16:9 clamps (tools/lift/lift.py GAME_PATCHES): 1 when the screen is narrower than 16:9, so
+ * the picture fills it instead of a band with black bars; USF_LETTERBOX=1 keeps the bars */
+int usf_fill_screen;
+unsigned usf_fit_w = 16, usf_fit_h = 9;                   /* the screen's shape for those clamps */
 void apply_aspect(uint32_t w, uint32_t h);
 void apply_aspect(uint32_t w, uint32_t h) {
     const char *e = getenv("USF_ASPECT");
@@ -142,7 +146,11 @@ void apply_aspect(uint32_t w, uint32_t h) {
         float x = 0, y = 0;
         if (sscanf(e, "%f:%f", &x, &y) == 2 && y > 0) a = x / y; else if (sscanf(e, "%f", &x) == 1 && x > 0) a = x;
     }
-    if (a < 16.0f / 9.0f + 0.002f) a = 16.0f / 9.0f;              /* 16:9 or narrower: the game as it was */
+    /* narrower than 16:9 (tablets: 5:3, 16:10, 4:3) the pair follows the screen too, so the picture fills it (the sides
+     * lose a little: UbiArt fits its camera by height); it was held at 16:9, with bars above and below */
+    if (a < 4.0f / 3.0f) a = 4.0f / 3.0f;
+    usf_fill_screen = a < 16.0f / 9.0f - 0.002f && !getenv("USF_LETTERBOX");
+    if (w && h) { usf_fit_w = w; usf_fit_h = h; }
     if (a > 32.0f / 9.0f) a = 32.0f / 9.0f;
     g_aspect = a;
     float inv = 1.0f / a;
@@ -152,6 +160,22 @@ void apply_aspect(uint32_t w, uint32_t h) {
         memcpy(HOST(GAME_ASPECT_PAIR), &a, 4);
         memcpy(HOST(GAME_ASPECT_PAIR + 4), &inv, 4);
     } else fprintf(stderr, "usf: ultrawide: the 16/9 pair is not where expected; left as it is\n");
+    /* the screen rectangle's fit (game.h GAME_FIT_*): to the same aspect, so nothing is letterboxed. On a tiling GPU the
+     * letterbox cost a partial clear that loads the whole picture (1.1 ms a frame on a Galaxy Tab S6 Lite at 720 lines),
+     * two full-screen copies and a pass for the bars */
+    static int fit_ok = -1;
+    if (fit_ok < 0) {
+        double inv0, a0;
+        memcpy(&inv0, HOST(GAME_FIT_INV), 8);
+        memcpy(&a0, HOST(GAME_FIT_ASPECT), 8);
+        fit_ok = inv0 == 0.5625 && a0 > 1.7777 && a0 < 1.7778;
+        if (!fit_ok) fprintf(stderr, "usf: the screen fit's 16:9 is not where expected; left as it is\n");
+    }
+    if (fit_ok) {
+        double ad = (double)a, invd = 1.0 / (double)a;
+        memcpy(HOST(GAME_FIT_ASPECT), &ad, 8);
+        memcpy(HOST(GAME_FIT_INV), &invd, 8);
+    }
     fprintf(stderr, "usf: ultrawide: aspect %.4f (Hor+)\n", a);
 }
 

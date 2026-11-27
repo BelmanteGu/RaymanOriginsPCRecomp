@@ -576,3 +576,66 @@ alpha-0 pixels never reach the RB: same pixel count, the game draws almost none)
 (`USF_DXVK=0`: 10-15 fps with Qualcomm's driver).
 Note: one Turnip trace came out with a time scale ~0.64x (16.3 "ms" scene at 35 fps): compare fps, not one trace's
 absolute times.
+
+## 2026-11-27 — Quality modes, touch controls at the screen's resolution, FSR 1.0, the driver's own contexts
+
+- **Quality modes** (launcher Options → Display, and the in-game menu): a "Mode" plank of its own with five planks
+  side by side, the name only: Potato 252 lines, Low 360, Medium 540, High 720, Max = the screen. Each is a resolution
+  (on the Redmi 10C the title screen runs 60 fps at 252 and 360 lines, 36 at 540; smaller textures were tried for
+  Potato and changed nothing, so it has none). Changing the resolution by hand reads "Custom"; frameskip stays a choice
+  of its own. In the game's menu: "Restart the game to apply the mode", brighter once changed. Lists over the screen
+  (Game files, GPU driver) start higher; the item under the cursor is bigger with a yellow outline in the plank's own
+  shape; the current one is marked `> <`. Designed first in tools/launcher_mock.html (`#opts`, `#choice`, `#driver`,
+  `#ingame` open those views), then the same coordinates in GameMenu.java (texts centred on the plank's opaque part:
+  x 3-61, y 15-46 of its 64x64 picture).
+- **Touch controls independent of the mode** (dxvk_overlay.c + tools/android/dxvk_mobile_overlay_fsr.patch): with the
+  patched DXVK (`DXVK_AndroidOverlay` found) the layer is drawn into a texture of the screen's resolution and DXVK
+  blends it over each presented image inside the controls' rectangles only (pre-rotation aware). Checked on the Galaxy
+  Tab S6 Lite (Adreno 618, Qualcomm driver): sharp, in place, with DXVK's fps counter. On the PC (DXVK 3.1.1, no such
+  entry) the layer is drawn on the back buffer as before.
+- **FSR 1.0 EASU** for enlarging (same patch): when the back buffer is smaller than the screen, DXVK's present uses a
+  GLSL port of AMD's FsrEasuF (ffx_fsr1.h, MIT) instead of bilinear; on by default, `fsr=0` in port_settings or
+  `USF_FSR=0` turns it off. Still to be checked on the Redmi (the Tab runs at its full 720 lines).
+- **The driver's own contexts with the power constraint** (gpu_boost.c, `USF_KGSL_HOOK=0` turns it off): the GOT
+  entries for `ioctl` in the driver's libraries go through a hook that adds KGSL_CONTEXT_PWR_CONSTRAINT to each context
+  the driver makes (and asks for the highest level on it) and flags its submissions. Installed after Direct3DCreate9
+  (the system's driver is loaded with DXVK's instance). On the Tab: `/vendor/lib64/libgsl.so` hooked, the driver's
+  context accepted the maximum level. The pinger (own context, a NOP every 30 ms) starts only when the hook found
+  nothing (or `gpuboost=1`). Still to be measured on the Redmi 10C against the slow state (10.8 vs ~36 fps).
+- dxvk_bridge.c back to 700 lines: the analysis switches (USF_OVERDRAW, NOBLEND, LODBIAS, SIMPLE_PS, NO_DEPTH) moved
+  to dxvk_psrot.c (`dxb_analysis`).
+
+## 2026-11-27 — 720 lines at 60 fps on the Adreno 618 (Galaxy Tab S6 Lite)
+
+The full account, with every measurement, switch and file: [ANDROID-PERFORMANCE.md](ANDROID-PERFORMANCE.md).
+
+- **No centroid on ps < 3 inputs** (tools/android/dxvk_mobile_nocentroid.patch): DXVK decorated every `ps_2_0` colour
+  input as Centroid, 2.7x slower per pixel on Qualcomm's driver without MSAA. Title screen at 1280x720: 24.2 → 35.5 fps.
+- **FSR off by default**, a check box in the launcher: EASU was ~85% of the GPU's ALU work. 36.0 → 48.9 fps.
+- **The display enlarges, the controls have their own surface**: the swap chain at the game's size (`DXVK_HWC_SIZE`,
+  ANativeWindow_setBuffersGeometry) and the touch controls on a SurfaceView drawn by a thread of their own. 720 lines:
+  48.5 → 57.5 fps.
+- **The game fills the screen**: UbiArt's `x * 9 >> 4` fit at 95 places, replaced in the lifter with the screen's
+  shape when it is narrower than 16:9 (`USF_LETTERBOX=1` keeps the bars). The partial clear (a 1.1 ms LOAD pass), two
+  StretchRects and the bars pass are gone. 57.5 → 60 fps.
+- **Framebuffer cache in DXVK** (tools/android/dxvk_mobile_adreno_perf.patch): a VkFramebuffer per render-target change
+  was a kernel allocation on Qualcomm's driver, 13% of the game's CPU in play. Game thread 16–20 → 10–12 ms a frame.
+- **The stick no longer stalls the game**: the touch layer drew under the lock the game thread takes for every finger
+  move; now the state is copied, only the changed rectangle is drawn (pre-scaled sprites), and only what each window
+  buffer lacks is copied (buffer age).
+- Also: fragment-only barriers, no blending into formats that cannot blend, the state cache in the data folder, a
+  per-pass GPU timer; tools/android/perf_ab.sh and tools/android/vkbench for measuring on the device.
+
+## 2026-11-27 — Saves to and from the PC
+
+- **Launcher: Game files → Save game** (SaveTransfer.java): export the game's save, import one, restore the one an
+  import replaced. The save is the PC game's own file (`Documents\My Games\Rayman Origins\Savegame\Savegame_N`, mapped
+  under `<data>/drive_c` by hle_k32_file.c): same executable, same format, so it is only copied. Nothing in it is tied
+  to the machine or the user: `GetUserNameW` only feeds an "unknown user" text, `GetAdaptersAddresses` is called from
+  the online library, and neither name nor address is in the file.
+- The file: 512 bytes of UTF-16 text for the slot ("246/246 [icon:GPE_ELECTOON]  10/10 [icon:GPE_TOOTH]"), then
+  UbiArt's serialized progress starting with `46 CB 43 0E` at 0x208, the check that a picked file is a save.
+- Three slots, Savegame_0 to _2; an imported file goes to the slot its name says. The game's process is ended before
+  an import or restore, so it cannot write over the new save. The replaced save is kept as `.bak`.
+- Checked on the Galaxy Tab S6 Lite with a 100% save made on Windows: the slot showed 246/246 and 10/10 and the world
+  map opened unlocked; the export came out byte for byte the same; restore swapped both ways.

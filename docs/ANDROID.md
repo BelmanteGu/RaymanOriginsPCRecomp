@@ -4,7 +4,8 @@ The same lifted C as the PC build, compiled with the NDK for arm64, with the run
 only) linked into `libmain.so`. Direct3D 9 goes to `libdxvk_d3d9.so`: dxvk-native 1.9.2b with mobile-GPU patches, its
 window system moved to SDL3 (Vulkan 1.1; `private/deps/dxvk-mobile`, from the Sonic & All-Stars Racing Transformed
 port), loaded next to `libmain.so` by the same bridge as on the PC. The game files are the user's own PC copy, read in
-place from the phone's storage. Status: **runs on the Galaxy S23** (2026-11-19, played by the user).
+place from the phone's storage. How it reached 60 fps at 720 lines on an Adreno 618, step by step:
+[ANDROID-PERFORMANCE.md](ANDROID-PERFORMANCE.md). Status: **runs on the Galaxy S23** (2026-11-19, played by the user).
 
 ## Build
 
@@ -18,6 +19,25 @@ sh tools/android/build_apk.sh           # private/android/rayman-origins-pc.apk 
 
 Needs NDK r28c, the Android SDK (build-tools 35, platform 35), JDK 17, an SDL3 3.4 Android build and source
 (`SDL3_ANDROID`, `SDL3_SRC`), the NDK's shaderc built once (`private/android/shaderc`).
+
+### DXVK on another PC
+
+`private/` is not in git: copy `private/deps/dxvk-mobile` (and `private/deps/libadrenotools`) from a PC that has them,
+or start again from dxvk-native `native-1.9.2b` with the mobile patches of the Sonic ASRT port and apply this port's
+patches in this order (`patch -p1` inside `private/deps/dxvk-mobile`):
+
+1. `tools/android/dxvk_mobile_gipa.patch` (the chosen driver's vkGetInstanceProcAddr)
+2. `tools/android/dxvk_mobile_passlog.patch` (render pass log, analysis)
+3. `tools/android/dxvk_mobile_lean.patch`, `tools/android/dxvk_mobile_lean_ff.patch` (lean shaders)
+4. `tools/android/dxvk_mobile_window.patch` (a new surface after leaving and coming back)
+5. `tools/android/dxvk_mobile_prerotate.patch` (pre-rotation)
+6. `tools/android/dxvk_mobile_overlay_fsr.patch` (touch layer at the screen's resolution, FSR 1.0 EASU)
+7. `tools/android/dxvk_mobile_nocentroid.patch` (no centroid on ps < 3 inputs: 2.7x slower per pixel on the Adreno)
+8. `tools/android/dxvk_mobile_adreno_perf.patch` (framebuffer cache, the window's buffers at the game's size, fragment-only
+   barriers, no blending where a format cannot blend)
+
+The new shaders' headers are made with `glslangValidator -V --vn <name> -o generated/<name>.h <file>` (names in the
+patches' headers), then `sh tools/android/build_dxvk_mobile.sh`.
 
 ## On the phone
 
@@ -41,5 +61,23 @@ installed, Turnip builds to download from GitHub (Turnip 26.3 R6 recommended: on
 newer works) and "Import driver (.zip)" for a pack of one's own (meta.json + the .so, the Winlator / Yuzu format).
 The choice applies at the next start; a driver that never draws sends the game back to the system's at the start
 after, and the launcher says so.
+
+**Saves to and from the PC**: Game files → Save game. The port keeps the game's save where the PC game does
+(`Documents\My Games\Rayman Origins\Savegame\`, under the app's data folder in `drive_c`), and the file is the same
+on both: same executable, same format, nothing tied to the machine or the user.
+
+- **Export save** writes `Savegame_0` (or `_1`, `_2`: the game's three files, chosen when more than one is used)
+  wherever the system's file picker points: Downloads, Drive, a USB stick. On the PC it goes, unchanged, in
+  `Documents\My Games\Rayman Origins\Savegame\` (inside OneDrive when Documents is synced there).
+- **Import save** takes the PC's `Savegame_N`, or a .zip holding it (a .7z must be unpacked first). It checks that the
+  file is a save of this game (bytes `46 CB 43 0E` at 0x208), shows its progress ("File 1: 246/246 Electoons 10/10
+  Teeth") and asks before replacing. The file goes to the slot its name says (`Savegame_1` to the second, a name
+  without a number to the first). If the game is still running in the background, it is ended first, so it cannot
+  write the old progress back.
+- **Restore the previous save** appears after an import: the replaced save was kept as `Savegame_N.bak`, and this
+  swaps the two (pressed again, it redoes the import).
+
+Checked on the Galaxy Tab S6 Lite with a save made on Windows: imported, the game's "Select a file." showed 246/246 and
+10/10 and the world map opened fully unlocked; exported, the file came out byte for byte the same.
 
 A physical controller works too (any SDL gamepad, read by the game as an XInput pad).

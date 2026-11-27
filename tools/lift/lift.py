@@ -42,6 +42,31 @@ LOAD = " ".join("%s = c->%s;" % (r, r) for r in REGS + FLAGS)
 JCC = {"jo", "jno", "jb", "jae", "je", "jne", "jbe", "ja", "js", "jns", "jp", "jnp", "jl", "jge", "jle", "jg"}
 HEADER = '#include "usf/cpu.h"\n#include "usf/flags.h"\n#include "usf/x87.h"\n#include "lifted.h"\n'
 
+# UbiArt fits its picture, cameras and screen rectangles to 16:9 with integer code: "lea r, [x + x*8]; shr r, 4" (x * 9 / 16)
+# next to the back buffer's width ([+0x10A0]), about a hundred times (found by scanning the lifted code: the instruction
+# after such a lea, within 14 instructions of a load of the width; plus the three of the viewport function at 0x7D98C1,
+# which loads the width before). On a screen narrower than 16:9 (tablets: 5:3, 16:10, 4:3) that made a 16:9 band with
+# black bars: the scene's viewport, a render target made every frame and two StretchRects to centre it. With
+# usf_fill_screen (d3d9_device.c apply_aspect) each of them uses the screen's own shape instead of 16:9:
+# x * usf_fit_h / usf_fit_w, so the picture fills the screen, as the 16/9 float pair already does for the camera.
+# USF_LETTERBOX=1 keeps the game's bars. The register is the shr's destination; its input is x * 9 (exact).
+FIT_SITES = (
+    0x40FFAF, 0x41196C, 0x4B84CF, 0x4B84DF, 0x4B859F, 0x4B8678, 0x4B9CA9, 0x4B9CC9,
+    0x4B9D50, 0x4BA108, 0x4BABA2, 0x4BACB1, 0x4BB13D, 0x4BB1C9, 0x4BB24C, 0x4BB268,
+    0x4BB2F2, 0x4BB561, 0x4BB6A1, 0x4BB76C, 0x4BBA2D, 0x4BC0A1, 0x4BC36C, 0x4BF90B,
+    0x4BF941, 0x4C223C, 0x4C2450, 0x4C26D0, 0x4C44D9, 0x4C50D5, 0x4C56B2, 0x4C5836,
+    0x51E3C2, 0x54ADEA, 0x54B350, 0x5605F3, 0x560607, 0x561F91, 0x561FA5, 0x5C3F6D,
+    0x5C4D63, 0x5C525D, 0x6585BA, 0x67B9F3, 0x67C1E5, 0x67C1F5, 0x67D0C3, 0x67D0D7,
+    0x697239, 0x69724A, 0x697A6F, 0x698C04, 0x6D7700, 0x6F0EA3, 0x6F112E, 0x6F1141,
+    0x6F196A, 0x6F197A, 0x6F1D5F, 0x7322EF, 0x7322FF, 0x74E644, 0x756A5D, 0x7744DB,
+    0x7A1572, 0x7B96B6, 0x7B9791, 0x7B9F4A, 0x7D63FE, 0x7D98ED, 0x7D9901, 0x7D9943,
+    0x7D9957, 0x7DA5CE, 0x7DA6AE, 0x7DAE6C, 0x7DAE80, 0x7DFBA7, 0x7E05EB, 0x7E05FF,
+    0x7FF540, 0x7FF550, 0x7FFA65, 0x83B93B, 0x85C8CD, 0x85CA25, 0x85CA3B, 0x86CDE9,
+    0x86D500, 0x879846, 0x87985A, 0x87F004, 0x87F036, 0x87F47E, 0x87F48E,
+)
+GAME_PATCHES = {a: "%s = usf_fill_screen ? (uint32_t)((uint64_t)(%s / 9u) * usf_fit_h / usf_fit_w) : %s >> 4; " \
+                   "fk = FK(FK_SHR, 4); fr = %s; fa = %s; fb = 4;" for a in FIT_SITES}
+
 
 def fname(a):
     return "f_%08X" % a
@@ -175,6 +200,11 @@ class FuncLifter:
                 self.partial.append(str(e))
                 stmts = ["usf_unknown(c, %s, \"not lifted: %s\");" % (hexu(ins.address), str(e).replace('"', "'"))]
                 terminal = True
+            if ins.address in GAME_PATCHES:
+                assert ins.mnemonic == "shr", "game patch at %08X: %s %s" % (ins.address, ins.mnemonic, ins.op_str)
+                reg = ins.op_str.split(",")[0].strip()
+                stmts = ["/* port patch */ { extern int usf_fill_screen; extern unsigned usf_fit_w, usf_fit_h; "
+                         + GAME_PATCHES[ins.address].replace("%s", reg) + " }"]
             if ins.mnemonic == "call" and ins.operands[0].type == X.X86_OP_IMM and \
                     (ins.operands[0].imm & 0xFFFFFFFF) in self.noreturn:
                 terminal = True

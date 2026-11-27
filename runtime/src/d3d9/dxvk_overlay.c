@@ -8,15 +8,28 @@
  *     (touch_picture), drawn first, only when there is one, and uploaded only when it changes.
  * Fixed-function pipeline, premultiplied-alpha blending. The game's state is kept in a state block (D3DSBT_ALL) and
  * its render target / depth buffer are put back after the draw.
+ * Android (DXVK with tools/android/dxvk_mobile_overlay_fsr.patch, DXVK_AndroidOverlay found): the layer is drawn
+ * into a texture of the screen's own resolution instead of the back buffer, and DXVK blends it over each presented
+ * image inside the controls' rectangles only: the controls stay sharp whatever the game's resolution (the
+ * launcher's quality modes), and the game's image alone is enlarged (FSR 1.0 EASU with "fsr=1" in port_settings, the launcher's check box).
  * What it does not do: anything when the layer is off (touch_picture returns NULL): no cost then.
  */
+#include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL3/SDL.h>
+
 #include "dxvk_bridge.h"
+
+#ifdef __ANDROID__
+static int layer_on(void);                      /* the touch layer below (GameActivity's SurfaceView) */
+#endif
 
 typedef struct { int art; float cx, cy, half, a; int bright; } TouchQuad;   /* touch.c */
 const uint8_t *touch_picture(int w, int h, int *changed);
+void touch_picture_rect(int *l, int *t, int *r, int *b);
 const TouchQuad *touch_quads(int *n);
 int touch_picture_has(void);
 extern int touch_gpu_sprites;
@@ -29,6 +42,148 @@ extern const uint8_t touch_art[];
 #define ATLAS_LEVELS 6                                   /* 256 .. 8 pixels a drawing */
 static void *tex, *atlas;
 static uint32_t tw, th;
+extern SDL_Window *g_window;
+static void (*ovl_fn)(void *tex, const int32_t *rects, uint32_t n);   /* DXVK_AndroidOverlay, or NULL */
+static void *ovl_tex;
+static uint32_t ow, oh;
+static int ovl_set;                                          /* an overlay is handed to DXVK now */
+
+/* DXVK just loaded: its overlay entry, and FSR for enlarging (on: "fsr=1" in port_settings or USF_FSR=1; off by default:
+ * on a Galaxy Tab S6 Lite the EASU pass was 85% of the GPU's shader work, 47 fps with it at 540 lines, 60 without) */
+void dxb_overlay_init(void *lib);
+void dxb_overlay_init(void *lib) {
+    ovl_fn = (void (*)(void *, const int32_t *, uint32_t))dlsym(lib, "DXVK_AndroidOverlay");
+    if (!ovl_fn) return;
+    int port_setting(const char *key, int def);
+    const char *e = getenv("USF_FSR");
+    setenv("DXVK_FSR", (e ? *e == '1' : port_setting("fsr", 0)) ? "1" : "0", 1);   /* off unless checked: see GameMenu */
+#ifdef __ANDROID__
+    /* the compositor enlarges the picture (the touch layer keeps the controls sharp): the swap chain's buffers at the
+     * game's own size, as hle_advapi.c video_setting makes it (RAYMAN_RES, or the launcher's lines in the screen's
+     * shape). Not with FSR (the GPU enlarges then) nor without the layer (the DXVK overlay needs the screen's size). */
+    if (!getenv("DXVK_HWC_SIZE") && !strcmp(getenv("DXVK_FSR"), "0") && layer_on() && !getenv("USF_NO_HWC")) {
+        int screen_size(uint32_t *w, uint32_t *h);
+        uint32_t sw = 0, sh = 0;
+        int w = 0, h = 0;
+        const char *r = getenv("RAYMAN_RES");
+        if (r) sscanf(r, "%dx%d", &w, &h);
+        else if (screen_size(&sw, &sh) && sh) {
+            int lines = port_setting("lines", 720);
+            h = sh < (uint32_t)lines ? (int)sh : lines;
+            w = (int)((uint64_t)sw * (uint32_t)h / sh) & ~7;
+        }
+        if (w > 0 && h > 0 && (!sh || (uint32_t)h < sh)) {
+            char g[32];
+            snprintf(g, sizeof g, "%dx%d", w, h);
+            setenv("DXVK_HWC_SIZE", g, 1);
+            fprintf(stderr, "usf: the compositor enlarges the picture: swap chain at %s\n", g);
+        }
+    }
+#endif
+    fprintf(stderr, "usf: touch layer at the screen's resolution; FSR %s\n", getenv("DXVK_FSR"));
+}
+#ifdef __ANDROID__
+/* ---- Android: the controls on a layer of their own (GameActivity.addTouchLayer, a transparent SurfaceView over the
+ * game's). The display hardware composes it with the game's picture, so the GPU neither draws the controls nor
+ * enlarges the picture: the swap chain stays at the game's resolution (DXVK_HWC_SIZE, below) and the compositor scales
+ * it. A thread of its own rasterises the controls (touch_picture, in software) only when they change and posts them.
+ * Measured on a Galaxy Tab S6 Lite at 720 lines: 49.7 fps with the GPU's present blit, 56.0 with the compositor's. */
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
+#include <jni.h>
+#include <pthread.h>
+void touch_redraw(void);
+static pthread_mutex_t lay_lk = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t lay_cv = PTHREAD_COND_INITIALIZER;
+static ANativeWindow *lay_win;                               /* the layer's window (null: no layer, the DXVK overlay) */
+static int lay_new, lay_kick, lay_started;
+/* The window cycles through a few buffers, each holding an older picture. Its age (how many posts ago it was shown,
+ * the query EGL's buffer age uses: libnativewindow's ANativeWindow_query, looked up since the NDK headers leave it out)
+ * says what it lacks: the rectangles of the posts since. Unknown age (0, a new buffer, no query): all of it. */
+#define HIST 8
+static int hist[HIST][4], nhist;                            /* the last posts' rectangles, newest first */
+static int buffer_age(ANativeWindow *win) {
+    static int (*q)(const ANativeWindow *, int, int *);
+    static int looked;
+    if (!looked) { looked = 1; q = (int (*)(const ANativeWindow *, int, int *))dlsym(RTLD_DEFAULT, "ANativeWindow_query"); }
+    int v = 0;
+    if (!q || q(win, 13 /* NATIVE_WINDOW_BUFFER_AGE */, &v) != 0) return 0;
+    return v;
+}
+static void unite(int *d, const int *s) {
+    if (s[0] >= s[2] || s[1] >= s[3]) return;
+    if (d[0] >= d[2] || d[1] >= d[3]) { memcpy(d, s, 4 * sizeof *d); return; }
+    if (s[0] < d[0]) d[0] = s[0];
+    if (s[1] < d[1]) d[1] = s[1];
+    if (s[2] > d[2]) d[2] = s[2];
+    if (s[3] > d[3]) d[3] = s[3];
+}
+static void *layer_loop(void *arg) {
+    (void)arg;
+    ANativeWindow *win = NULL;
+    int had = 0;                                             /* the posted picture shows something */
+    for (;;) {
+        pthread_mutex_lock(&lay_lk);
+        while (!lay_kick && !lay_new) pthread_cond_wait(&lay_cv, &lay_lk);
+        int fresh = lay_new;
+        lay_kick = lay_new = 0;
+        if (fresh) { if (win) ANativeWindow_release(win); win = lay_win; if (win) ANativeWindow_acquire(win); }
+        pthread_mutex_unlock(&lay_lk);
+        if (!win) continue;
+        int w = ANativeWindow_getWidth(win), h = ANativeWindow_getHeight(win);
+        if (w <= 0 || h <= 0) continue;
+        if (fresh) { ANativeWindow_setBuffersGeometry(win, w, h, WINDOW_FORMAT_RGBA_8888); touch_redraw(); had = 1; }
+        int changed = 0;
+        touch_gpu_sprites = 0;                               /* the drawings rasterised into the picture too */
+        const uint8_t *pic = touch_picture(w, h, &changed);
+        if (!changed && !(had && !pic)) continue;
+        /* only what changed (the stick's square while it moves), plus what this buffer missed */
+        int cur[4] = {0, 0, w, h};
+        if (pic && changed && !fresh) touch_picture_rect(&cur[0], &cur[1], &cur[2], &cur[3]);
+        if (fresh) nhist = 0;
+        ANativeWindow_Buffer b;
+        if (ANativeWindow_lock(win, &b, NULL) != 0) continue;
+        static int copy_all = -1;
+        if (copy_all < 0) copy_all = getenv("USF_LAYER_COPYALL") != NULL;
+        int age = copy_all ? 0 : buffer_age(win), rc[4] = {0, 0, b.width, b.height};
+        if (age > 0 && age - 1 <= nhist && b.width == w && b.height == h) {
+            memcpy(rc, cur, sizeof rc);
+            for (int i = 0; i < age - 1; i++) unite(rc, hist[i]);
+        }
+        memmove(hist[1], hist[0], sizeof hist[0] * (HIST - 1));
+        memcpy(hist[0], cur, sizeof cur);
+        if (nhist < HIST - 1) nhist++;
+        static int logn = -1;
+        if (logn < 0) logn = getenv("USF_LAYER_LOG") ? 200 : 0;
+        if (logn > 0) { logn--; SDL_Log("layer: age %d, copy %d,%d-%d,%d, changed %d,%d-%d,%d", age, rc[0], rc[1], rc[2], rc[3], cur[0], cur[1], cur[2], cur[3]); }
+        int x0 = rc[0] < 0 ? 0 : rc[0], x1 = rc[2] > b.width ? b.width : rc[2], y0 = rc[1] < 0 ? 0 : rc[1], y1 = rc[3] > b.height ? b.height : rc[3];
+        for (int y = y0; y < y1 && x0 < x1; y++) {
+            uint8_t *d = (uint8_t *)b.bits + ((size_t)y * (size_t)b.stride + (size_t)x0) * 4;
+            int cw = (x1 < w ? x1 : w) - x0;
+            if (pic && y < h && cw > 0) memcpy(d, pic + ((size_t)y * (size_t)w + (size_t)x0) * 4, (size_t)cw * 4);   /* RGBA, premultiplied */
+            else memset(d, 0, (size_t)(x1 - x0) * 4);
+        }
+        ANativeWindow_unlockAndPost(win);
+        had = pic != NULL;
+    }
+    return NULL;
+}
+JNIEXPORT void JNICALL Java_io_github_belmantegu_raymanpc_GameActivity_nativeTouchSurface(JNIEnv *e, jclass c, jobject surface) {
+    (void)c;
+    ANativeWindow *w = surface ? ANativeWindow_fromSurface(e, surface) : NULL;
+    pthread_mutex_lock(&lay_lk);
+    if (lay_win) ANativeWindow_release(lay_win);
+    lay_win = w;
+    lay_new = 1;
+    if (!lay_started) { pthread_t t; if (!pthread_create(&t, NULL, layer_loop, NULL)) { pthread_detach(t); lay_started = 1; } }
+    pthread_cond_signal(&lay_cv);
+    pthread_mutex_unlock(&lay_lk);
+    fprintf(stderr, "usf: touch layer %s\n", w ? "on its own surface" : "gone");
+}
+static int layer_on(void) { return lay_win != NULL; }
+static void layer_kick_now(void) { pthread_mutex_lock(&lay_lk); lay_kick = 1; pthread_cond_signal(&lay_cv); pthread_mutex_unlock(&lay_lk); }
+#endif
+static void ovl_clear(void) { if (ovl_set) { ovl_fn(NULL, NULL, 0); ovl_set = 0; } }
 
 static void release(void *o) { if (o) M(o, 2)(o, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); }
 
@@ -69,15 +224,42 @@ static void *make_atlas(void *dev) {
 
 void dxb_overlay_draw(void *dev);
 void dxb_overlay_draw(void *dev) {
+#ifdef __ANDROID__
+    if (layer_on()) {                                 /* the controls are on their own layer: just say a frame passed */
+        if (ovl_set) ovl_clear();
+        layer_kick_now();
+        return;
+    }
+#endif
     void *bb = NULL;
-    if ((int32_t)M(dev, 18)(dev, 0, 0, 0, U(&bb), 0, 0, 0, 0, 0, 0, 0) < 0 || !bb) return;   /* GetBackBuffer */
-    uint32_t desc[8];
-    M(bb, 12)(bb, U(desc), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                                   /* GetDesc */
-    uint32_t w = desc[6], h = desc[7];
+    uint32_t w = 0, h = 0;
+    int over = 0;                                     /* drawing into the screen-sized overlay */
+    if (ovl_fn && g_window) {
+        int sw = 0, sh = 0;
+        SDL_GetWindowSizeInPixels(g_window, &sw, &sh);
+        if (sw < sh) { int t = sw; sw = sh; sh = t; }                                    /* (the game is landscape) */
+        if (sw > 0 && (!ovl_tex || ow != (uint32_t)sw || oh != (uint32_t)sh)) {
+            ovl_clear();
+            release(ovl_tex);
+            ovl_tex = NULL;
+            /* CreateTexture: RENDERTARGET, A8R8G8B8, DEFAULT */
+            if ((int32_t)M(dev, 23)(dev, (uint64_t)sw, (uint64_t)sh, 1, 1, 21, 0, U(&ovl_tex), 0, 0, 0, 0) < 0) ovl_tex = NULL;
+            ow = (uint32_t)sw; oh = (uint32_t)sh;
+        }
+        if (ovl_tex && (int32_t)M(ovl_tex, 18)(ovl_tex, 0, U(&bb), 0, 0, 0, 0, 0, 0, 0, 0, 0) >= 0 && bb) {   /* GetSurfaceLevel */
+            over = 1; w = ow; h = oh;
+        }
+    }
+    if (!over) {
+        if ((int32_t)M(dev, 18)(dev, 0, 0, 0, U(&bb), 0, 0, 0, 0, 0, 0, 0) < 0 || !bb) return;   /* GetBackBuffer */
+        uint32_t desc[8];
+        M(bb, 12)(bb, U(desc), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                               /* GetDesc */
+        w = desc[6]; h = desc[7];
+    }
     int changed = 0;
     touch_gpu_sprites = 1;
     const uint8_t *pic = touch_picture((int)w, (int)h, &changed);
-    if (!pic) { release(bb); return; }
+    if (!pic) { if (over) ovl_clear(); release(bb); return; }
     int nq = 0;
     const TouchQuad *q = touch_quads(&nq);
     int has_pic = touch_picture_has();
@@ -99,7 +281,7 @@ void dxb_overlay_draw(void *dev) {
             M(tex, 20)(tex, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                              /* UnlockRect */
         }
     }
-    if (!has_pic && (!nq || !atlas)) { release(bb); return; }
+    if (!has_pic && (!nq || !atlas)) { if (over) ovl_clear(); release(bb); return; }
     void *sb = NULL, *rt = NULL, *ds = NULL;
     M(dev, 59)(dev, 1, U(&sb), 0, 0, 0, 0, 0, 0, 0, 0, 0);                                  /* CreateStateBlock(ALL) */
     M(dev, 38)(dev, 0, U(&rt), 0, 0, 0, 0, 0, 0, 0, 0, 0);                                  /* GetRenderTarget(0) */
@@ -119,6 +301,7 @@ void dxb_overlay_draw(void *dev) {
     static const uint32_t ss[][2] = {{1, 3}, {2, 3}, {11, 0}};                             /* clamp U / V, no sRGB */
     for (unsigned i = 0; i < 3; i++) M(dev, 69)(dev, 0, ss[i][0], ss[i][1], 0, 0, 0, 0, 0, 0, 0, 0);
     M(dev, 41)(dev, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                                       /* BeginScene */
+    if (over) M(dev, 43)(dev, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0);                              /* Clear: transparent */
     if (has_pic) {                                    /* the shapes and text: one full-screen quad, point sampled */
         M(dev, 89)(dev, 0x104, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                               /* FVF XYZRHW | TEX1 */
         M(dev, 65)(dev, 0, U(tex), 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -159,4 +342,21 @@ void dxb_overlay_draw(void *dev) {
     M(dev, 37)(dev, 0, U(rt), 0, 0, 0, 0, 0, 0, 0, 0, 0);
     M(dev, 39)(dev, U(ds), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     release(rt); release(ds); release(bb);
+    if (over) {                                       /* DXVK blends it inside these rectangles (x, y, w, h) */
+        int32_t r[33 * 4];
+        uint32_t n = 0;
+        if (has_pic) { r[0] = 0; r[1] = 0; r[2] = (int32_t)w; r[3] = (int32_t)h; n = 1; }
+        else for (int i = 0; i < nq && i < 32; i++) {
+            float x0 = q[i].cx - q[i].half - 2, y0 = q[i].cy - q[i].half - 2, x1 = q[i].cx + q[i].half + 2, y1 = q[i].cy + q[i].half + 2;
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > (float)w) x1 = (float)w;
+            if (y1 > (float)h) y1 = (float)h;
+            if (x1 <= x0 || y1 <= y0) continue;
+            r[n * 4] = (int32_t)x0; r[n * 4 + 1] = (int32_t)y0; r[n * 4 + 2] = (int32_t)(x1 - (int32_t)x0 + 1); r[n * 4 + 3] = (int32_t)(y1 - (int32_t)y0 + 1);
+            n++;
+        }
+        ovl_fn(ovl_tex, r, n);
+        ovl_set = 1;
+    }
 }

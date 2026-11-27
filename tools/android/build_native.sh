@@ -8,7 +8,7 @@
 #        SDL3_SRC=the SDL3 source tree, for its headers and Java files)
 set -e
 NDK=${NDK:-$HOME/Android/Sdk/ndk/28.2.13676358}
-TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+TC=$(ls -d $NDK/toolchains/llvm/prebuilt/*/bin | head -1)   # linux-x86_64 or darwin-x86_64
 SDL3_SRC=${SDL3_SRC:-$HOME/Documentos/Projetos/Recomps/Castlevania/private/third_party/SDL3-3.4.0}
 SDL3_ANDROID=${SDL3_ANDROID:-$HOME/Documentos/Projetos/Recomps/Castlevania/private/build-android/sdl3}
 OUT=private/android/lib/arm64-v8a
