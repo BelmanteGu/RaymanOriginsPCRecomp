@@ -576,3 +576,31 @@ alpha-0 pixels never reach the RB: same pixel count, the game draws almost none)
 (`USF_DXVK=0`: 10-15 fps with Qualcomm's driver).
 Note: one Turnip trace came out with a time scale ~0.64x (16.3 "ms" scene at 35 fps): compare fps, not one trace's
 absolute times.
+
+## 2026-11-27 — Quality modes, touch controls at the screen's resolution, FSR 1.0, the driver's own contexts
+
+- **Quality modes** (launcher Options → Display, and the in-game menu): a "Mode" plank of its own with five planks
+  side by side, the name only: Potato 252 lines, Low 360, Medium 540, High 720, Max = the screen. Each is a resolution
+  (on the Redmi 10C the title screen runs 60 fps at 252 and 360 lines, 36 at 540; smaller textures were tried for
+  Potato and changed nothing, so it has none). Changing the resolution by hand reads "Custom"; frameskip stays a choice
+  of its own. In the game's menu: "Restart the game to apply the mode", brighter once changed. Lists over the screen
+  (Game files, GPU driver) start higher; the item under the cursor is bigger with a yellow outline in the plank's own
+  shape; the current one is marked `> <`. Designed first in tools/launcher_mock.html (`#opts`, `#choice`, `#driver`,
+  `#ingame` open those views), then the same coordinates in GameMenu.java (texts centred on the plank's opaque part:
+  x 3-61, y 15-46 of its 64x64 picture).
+- **Touch controls independent of the mode** (dxvk_overlay.c + tools/android/dxvk_mobile_overlay_fsr.patch): with the
+  patched DXVK (`DXVK_AndroidOverlay` found) the layer is drawn into a texture of the screen's resolution and DXVK
+  blends it over each presented image inside the controls' rectangles only (pre-rotation aware). Checked on the Galaxy
+  Tab S6 Lite (Adreno 618, Qualcomm driver): sharp, in place, with DXVK's fps counter. On the PC (DXVK 3.1.1, no such
+  entry) the layer is drawn on the back buffer as before.
+- **FSR 1.0 EASU** for enlarging (same patch): when the back buffer is smaller than the screen, DXVK's present uses a
+  GLSL port of AMD's FsrEasuF (ffx_fsr1.h, MIT) instead of bilinear; on by default, `fsr=0` in port_settings or
+  `USF_FSR=0` turns it off. Still to be checked on the Redmi (the Tab runs at its full 720 lines).
+- **The driver's own contexts with the power constraint** (gpu_boost.c, `USF_KGSL_HOOK=0` turns it off): the GOT
+  entries for `ioctl` in the driver's libraries go through a hook that adds KGSL_CONTEXT_PWR_CONSTRAINT to each context
+  the driver makes (and asks for the highest level on it) and flags its submissions. Installed after Direct3DCreate9
+  (the system's driver is loaded with DXVK's instance). On the Tab: `/vendor/lib64/libgsl.so` hooked, the driver's
+  context accepted the maximum level. The pinger (own context, a NOP every 30 ms) starts only when the hook found
+  nothing (or `gpuboost=1`). Still to be measured on the Redmi 10C against the slow state (10.8 vs ~36 fps).
+- dxvk_bridge.c back to 700 lines: the analysis switches (USF_OVERDRAW, NOBLEND, LODBIAS, SIMPLE_PS, NO_DEPTH) moved
+  to dxvk_psrot.c (`dxb_analysis`).

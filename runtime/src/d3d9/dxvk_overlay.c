@@ -8,10 +8,18 @@
  *     (touch_picture), drawn first, only when there is one, and uploaded only when it changes.
  * Fixed-function pipeline, premultiplied-alpha blending. The game's state is kept in a state block (D3DSBT_ALL) and
  * its render target / depth buffer are put back after the draw.
+ * Android (DXVK with tools/android/dxvk_mobile_overlay_fsr.patch, DXVK_AndroidOverlay found): the layer is drawn
+ * into a texture of the screen's own resolution instead of the back buffer, and DXVK blends it over each presented
+ * image inside the controls' rectangles only: the controls stay sharp whatever the game's resolution (the
+ * launcher's quality modes), and the game's image alone is enlarged (FSR 1.0 EASU unless "fsr=0" in port_settings).
  * What it does not do: anything when the layer is off (touch_picture returns NULL): no cost then.
  */
+#include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <SDL3/SDL.h>
 
 #include "dxvk_bridge.h"
 
@@ -29,6 +37,23 @@ extern const uint8_t touch_art[];
 #define ATLAS_LEVELS 6                                   /* 256 .. 8 pixels a drawing */
 static void *tex, *atlas;
 static uint32_t tw, th;
+extern SDL_Window *g_window;
+static void (*ovl_fn)(void *tex, const int32_t *rects, uint32_t n);   /* DXVK_AndroidOverlay, or NULL */
+static void *ovl_tex;
+static uint32_t ow, oh;
+static int ovl_set;                                          /* an overlay is handed to DXVK now */
+
+/* DXVK just loaded: its overlay entry, and FSR for enlarging (off: "fsr=0" in port_settings or USF_FSR=0) */
+void dxb_overlay_init(void *lib);
+void dxb_overlay_init(void *lib) {
+    ovl_fn = (void (*)(void *, const int32_t *, uint32_t))dlsym(lib, "DXVK_AndroidOverlay");
+    if (!ovl_fn) return;
+    int port_setting(const char *key, int def);
+    const char *e = getenv("USF_FSR");
+    setenv("DXVK_FSR", (e ? *e == '1' : port_setting("fsr", 1)) ? "1" : "0", 1);
+    fprintf(stderr, "usf: touch layer at the screen's resolution; FSR %s\n", getenv("DXVK_FSR"));
+}
+static void ovl_clear(void) { if (ovl_set) { ovl_fn(NULL, NULL, 0); ovl_set = 0; } }
 
 static void release(void *o) { if (o) M(o, 2)(o, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); }
 
@@ -70,14 +95,34 @@ static void *make_atlas(void *dev) {
 void dxb_overlay_draw(void *dev);
 void dxb_overlay_draw(void *dev) {
     void *bb = NULL;
-    if ((int32_t)M(dev, 18)(dev, 0, 0, 0, U(&bb), 0, 0, 0, 0, 0, 0, 0) < 0 || !bb) return;   /* GetBackBuffer */
-    uint32_t desc[8];
-    M(bb, 12)(bb, U(desc), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                                   /* GetDesc */
-    uint32_t w = desc[6], h = desc[7];
+    uint32_t w = 0, h = 0;
+    int over = 0;                                     /* drawing into the screen-sized overlay */
+    if (ovl_fn && g_window) {
+        int sw = 0, sh = 0;
+        SDL_GetWindowSizeInPixels(g_window, &sw, &sh);
+        if (sw < sh) { int t = sw; sw = sh; sh = t; }                                    /* (the game is landscape) */
+        if (sw > 0 && (!ovl_tex || ow != (uint32_t)sw || oh != (uint32_t)sh)) {
+            ovl_clear();
+            release(ovl_tex);
+            ovl_tex = NULL;
+            /* CreateTexture: RENDERTARGET, A8R8G8B8, DEFAULT */
+            if ((int32_t)M(dev, 23)(dev, (uint64_t)sw, (uint64_t)sh, 1, 1, 21, 0, U(&ovl_tex), 0, 0, 0, 0) < 0) ovl_tex = NULL;
+            ow = (uint32_t)sw; oh = (uint32_t)sh;
+        }
+        if (ovl_tex && (int32_t)M(ovl_tex, 18)(ovl_tex, 0, U(&bb), 0, 0, 0, 0, 0, 0, 0, 0, 0) >= 0 && bb) {   /* GetSurfaceLevel */
+            over = 1; w = ow; h = oh;
+        }
+    }
+    if (!over) {
+        if ((int32_t)M(dev, 18)(dev, 0, 0, 0, U(&bb), 0, 0, 0, 0, 0, 0, 0) < 0 || !bb) return;   /* GetBackBuffer */
+        uint32_t desc[8];
+        M(bb, 12)(bb, U(desc), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                               /* GetDesc */
+        w = desc[6]; h = desc[7];
+    }
     int changed = 0;
     touch_gpu_sprites = 1;
     const uint8_t *pic = touch_picture((int)w, (int)h, &changed);
-    if (!pic) { release(bb); return; }
+    if (!pic) { if (over) ovl_clear(); release(bb); return; }
     int nq = 0;
     const TouchQuad *q = touch_quads(&nq);
     int has_pic = touch_picture_has();
@@ -99,7 +144,7 @@ void dxb_overlay_draw(void *dev) {
             M(tex, 20)(tex, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                              /* UnlockRect */
         }
     }
-    if (!has_pic && (!nq || !atlas)) { release(bb); return; }
+    if (!has_pic && (!nq || !atlas)) { if (over) ovl_clear(); release(bb); return; }
     void *sb = NULL, *rt = NULL, *ds = NULL;
     M(dev, 59)(dev, 1, U(&sb), 0, 0, 0, 0, 0, 0, 0, 0, 0);                                  /* CreateStateBlock(ALL) */
     M(dev, 38)(dev, 0, U(&rt), 0, 0, 0, 0, 0, 0, 0, 0, 0);                                  /* GetRenderTarget(0) */
@@ -119,6 +164,7 @@ void dxb_overlay_draw(void *dev) {
     static const uint32_t ss[][2] = {{1, 3}, {2, 3}, {11, 0}};                             /* clamp U / V, no sRGB */
     for (unsigned i = 0; i < 3; i++) M(dev, 69)(dev, 0, ss[i][0], ss[i][1], 0, 0, 0, 0, 0, 0, 0, 0);
     M(dev, 41)(dev, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                                       /* BeginScene */
+    if (over) M(dev, 43)(dev, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0);                              /* Clear: transparent */
     if (has_pic) {                                    /* the shapes and text: one full-screen quad, point sampled */
         M(dev, 89)(dev, 0x104, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);                               /* FVF XYZRHW | TEX1 */
         M(dev, 65)(dev, 0, U(tex), 0, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -159,4 +205,21 @@ void dxb_overlay_draw(void *dev) {
     M(dev, 37)(dev, 0, U(rt), 0, 0, 0, 0, 0, 0, 0, 0, 0);
     M(dev, 39)(dev, U(ds), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
     release(rt); release(ds); release(bb);
+    if (over) {                                       /* DXVK blends it inside these rectangles (x, y, w, h) */
+        int32_t r[33 * 4];
+        uint32_t n = 0;
+        if (has_pic) { r[0] = 0; r[1] = 0; r[2] = (int32_t)w; r[3] = (int32_t)h; n = 1; }
+        else for (int i = 0; i < nq && i < 32; i++) {
+            float x0 = q[i].cx - q[i].half - 2, y0 = q[i].cy - q[i].half - 2, x1 = q[i].cx + q[i].half + 2, y1 = q[i].cy + q[i].half + 2;
+            if (x0 < 0) x0 = 0;
+            if (y0 < 0) y0 = 0;
+            if (x1 > (float)w) x1 = (float)w;
+            if (y1 > (float)h) y1 = (float)h;
+            if (x1 <= x0 || y1 <= y0) continue;
+            r[n * 4] = (int32_t)x0; r[n * 4 + 1] = (int32_t)y0; r[n * 4 + 2] = (int32_t)(x1 - (int32_t)x0 + 1); r[n * 4 + 3] = (int32_t)(y1 - (int32_t)y0 + 1);
+            n++;
+        }
+        ovl_fn(ovl_tex, r, n);
+        ovl_set = 1;
+    }
 }

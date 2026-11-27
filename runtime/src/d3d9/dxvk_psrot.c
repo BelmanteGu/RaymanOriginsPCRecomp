@@ -99,3 +99,49 @@ void alphakill_draw(void *nat) {
     dxb_method(nat, 57)(nat, 15, (uint64_t)want, 0, 0, 0, 0, 0, 0, 0, 0, 0);   /* ALPHATESTENABLE */
     set = want;
 }
+
+
+/* Analysis switches on the device's calls (all off unless asked for); 1 when the call was answered here (*ret):
+ *   USF_OVERDRAW=1: each pixel's value = the layers drawn on it (additive 1/255 per layer, black clears);
+ *   USF_NOBLEND=1: no blending; USF_LODBIAS=1: the tiny mips only;
+ *   USF_SIMPLE_PS=1: every pixel shader a minimal one (texld; mov); USF_NO_DEPTH=1: the game's depth buffer unbound. */
+#define DM(slot) dxb_method(nat, (slot))
+#define P(x) ((uint64_t)(uintptr_t)(x))
+int dxb_analysis(void *nat, int slot, uint32_t a, uint32_t *ret) {
+    static int od = -1, nb, lod, simple, nodepth;
+    static void *ops, *sps;
+    if (od < 0) {
+        od = getenv("USF_OVERDRAW") != NULL; nb = getenv("USF_NOBLEND") != NULL; lod = getenv("USF_LODBIAS") != NULL;
+        simple = getenv("USF_SIMPLE_PS") != NULL; nodepth = getenv("USF_NO_DEPTH") != NULL;
+    }
+    int draw = slot >= 81 && slot <= 84;
+    if (od && slot == 107 && ARG(1)) {
+        if (!ops) {                                      /* ps_2_0: def c0, 1/255 (rgb), 1; mov oC0, c0 */
+            static const uint32_t code[] = {0xFFFF0200, 0x05000051, 0xA00F0000, 0x3B808081, 0x3B808081, 0x3B808081,
+                0x3F800000, 0x02000001, 0x800F0800, 0xA0E40000, 0x0000FFFF};
+            DM(106)(nat, P(code), P(&ops), 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        if (ops) { *ret = (uint32_t)DM(107)(nat, P(ops), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); return 1; }
+    }
+    if (od && draw) {                                    /* additive, every colour channel, no depth / alpha test */
+        static const uint32_t rs[][2] = {{27, 1}, {19, 2}, {20, 2}, {171, 1}, {168, 0xF}, {7, 0}, {15, 0}, {206, 0}};
+        for (unsigned i = 0; i < sizeof rs / sizeof rs[0]; i++) DM(57)(nat, rs[i][0], rs[i][1], 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+    if (od && slot == 43) W32(a + 16, 0);                /* clears to black */
+    if (nb && draw) DM(57)(nat, 27, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    if (lod && draw) for (uint64_t st = 0; st < 4; st++) {
+        DM(69)(nat, st, 9, 7, 0, 0, 0, 0, 0, 0, 0, 0);    /* MAXMIPLEVEL 7 */
+        DM(69)(nat, st, 7, 2, 0, 0, 0, 0, 0, 0, 0, 0);    /* MIPFILTER linear */
+    }
+    if (simple && slot == 107 && ARG(1)) {
+        if (!sps) {                                      /* ps_2_0: dcl t0.xy; dcl_2d s0; texld r0, t0, s0; mov oC0, r0 */
+            static const uint32_t code[] = {0xFFFF0200, 0x0200001F, 0x80000000, 0xB0030000, 0x0200001F, 0x90000000,
+                0xA00F0800, 0x03000042, 0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000,
+                0x0000FFFF};
+            DM(106)(nat, P(code), P(&sps), 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        if (sps) { *ret = (uint32_t)DM(107)(nat, P(sps), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); return 1; }
+    }
+    if (nodepth && slot == 39) { *ret = (uint32_t)DM(39)(nat, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); return 1; }
+    return 0;
+}

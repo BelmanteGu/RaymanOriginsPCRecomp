@@ -83,6 +83,24 @@ const I18N={
  'Change':['Changer','Ändern','Cambiar','Cambia','Wijzigen','Mudar','Zmień','Изменить'],
  'Display Options':["Options d'affichage",'Anzeigeoptionen','Opciones de pantalla','Opzioni schermo','Beeldopties','Opções de tela','Opcje obrazu','Настройки экрана'],
  'Resolution':['Résolution','Auflösung','Resolución','Risoluzione','Resolutie','Resolução','Rozdzielczość','Разрешение'],
+ 'Frameskip':["Saut d'images",'Frameskip','Salto de cuadros','Salto fotogrammi','Frameskip','Pular quadros','Pomijanie klatek','Пропуск кадров'],
+ 'Mode':['Mode','Modus','Modo','Modalità','Modus','Modo','Tryb','Режим'],
+ 'Potato':['Patate','Kartoffel','Patata','Patata','Aardappel','Batata','Ziemniak','Картошка'],
+ 'Low':['Bas','Niedrig','Bajo','Basso','Laag','Baixo','Niski','Низкий'],
+ 'Medium':['Moyen','Mittel','Medio','Medio','Gemiddeld','Médio','Średni','Средний'],
+ 'High':['Élevé','Hoch','Alto','Alto','Hoog','Alto','Wysoki','Высокий'],
+ 'Max':['Max','Max','Máximo','Massimo','Max','Máximo','Maks.','Макс.'],
+ 'Restart the game to apply the mode':['Redémarrez le jeu pour appliquer le mode','Spiel neu starten, um den Modus zu übernehmen','Reinicia el juego para aplicar el modo','Riavvia il gioco per applicare la modalità','Herstart het spel om de modus toe te passen','Reinicie o jogo para aplicar o modo','Uruchom grę ponownie, aby zastosować tryb','Перезапустите игру, чтобы применить режим'],
+ 'GPU driver':['Pilote GPU','GPU-Treiber','Controlador de GPU','Driver GPU','GPU-driver','Driver de GPU','Sterownik GPU','Драйвер GPU'],
+ 'System driver (Turnip off)':['Pilote du système (Turnip désactivé)','System-Treiber (Turnip aus)','Controlador del sistema (Turnip desactivado)','Driver di sistema (Turnip spento)','Systeemdriver (Turnip uit)','Driver do sistema (Turnip desligado)','Sterownik systemowy (Turnip wył.)','Системный драйвер (Turnip выкл.)'],
+ 'Turnip 26.3 R6':['Turnip 26.3 R6','Turnip 26.3 R6','Turnip 26.3 R6','Turnip 26.3 R6','Turnip 26.3 R6','Turnip 26.3 R6','Turnip 26.3 R6','Turnip 26.3 R6'],
+ 'Download':['Télécharger','Laden','Descargar','Scarica','Downloaden','Baixar','Pobierz','Скачать'],
+ 'Import driver (.zip)':['Importer un pilote (.zip)','Treiber importieren (.zip)','Importar controlador (.zip)','Importa driver (.zip)','Driver importeren (.zip)','Importar driver (.zip)','Importuj sterownik (.zip)','Импорт драйвера (.zip)'],
+ 'The last driver did not work; the system driver was used.':["Le dernier pilote n'a pas fonctionné ; celui du système a été utilisé.",'Der letzte Treiber lief nicht; der System-Treiber wurde benutzt.','El último controlador no funcionó; se usó el del sistema.',"L'ultimo driver non ha funzionato; è stato usato quello di sistema.",'De laatste driver werkte niet; de systeemdriver is gebruikt.','O último driver não funcionou; foi usado o do sistema.','Ostatni sterownik nie działał; użyto systemowego.','Последний драйвер не заработал; использован системный.'],
+ 'Custom':['Personnalisé','Eigene','Personalizado','Personalizzato','Aangepast','Personalizado','Własny','Свой'],
+ 'Game folder':['Dossier du jeu','Spielordner','Carpeta del juego','Cartella del gioco','Spelmap','Pasta do jogo','Folder gry','Папка игры'],
+ '.zip file':['Fichier .zip','.zip-Datei','Archivo .zip','File .zip','.zip-bestand','Arquivo .zip','Plik .zip','Файл .zip'],
+ 'Light copy (560 MB)':['Copie légère (560 Mo)','Leichte Kopie (560 MB)','Copia ligera (560 MB)','Copia leggera (560 MB)','Lichte kopie (560 MB)','Cópia leve (560 MB)','Lekka kopia (560 MB)','Лёгкая копия (560 МБ)'],
  'Sound Options':['Options sonores','Tonoptionen','Opciones de sonido','Opzioni audio','Geluidsopties','Opções de som','Opcje dźwięku','Настройки звука'],
  'Music Volume':['Volume musique','Musiklautstärke','Volumen música','Volume musica','Muziekvolume','Volume da música','Głośność muzyki','Громк. музыки'],
  'SFX Volume':['Volume effets','Effektlautstärke','Volumen efectos','Volume effetti','Effectvolume','Volume dos efeitos','Głośność efektów','Громк. эффектов'],
@@ -178,16 +196,26 @@ const SIZES=['Off','S','M','L'];
 const LANGS=['English','Français','Deutsch','Español','Italiano','Português','Polski','Русский','Nederlands','Čeština','Magyar','Japanese'];   /* the game's 12 (port_settings lang=) */
 const ROWS=[['Defaults',['RESET']],['Language',LANGS],['Opacity',['50 %','75 %','100 %']],['Stick',['Floating','Fixed']],['Run',['Toggle','Hold']],
   ['Vibration',['On','Off']],['Pad hides',['On','Off']],['Show FPS',['Off','On']],['Game files',['Change']]];
-const RES=['2340 x 1080','1950 x 900','1560 x 720','1170 x 540'];
-const DEF={size:2,rows:[0,0,1,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1};
+const RES=['2340 x 1080','1560 x 720','1170 x 540','780 x 360','546 x 252'];
+const DEF={size:2,rows:[0,0,1,0,0,0,0,0,0],res:2,fps120:false,music:1,sfx:1,skip:true};
+/* quality modes: five planks side by side under Display Options (each a resolution; "Custom" when changed by hand) */
+const INGAME=location.hash.includes('ingame');
+const MODES=['Potato','Low','Medium','High','Max'], MODE_LINES=[252,360,540,720,0], MROW=196;
+/* 0 to 4 filled bars, like a signal (Potato: none filled) */
+function modeIcon(i,sel){const c=sel?'#fff2b0':'#7a1408';let b='';
+  for(let k=0;k<4;k++){const h=10+k*9;b+=`<rect x="${4+k*15}" y="${40-h}" width="11" height="${h}" rx="2" fill="${k<i?c:'rgba(90,20,8,.28)'}"/>`;}
+  return 'data:image/svg+xml,'+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 42">${b}</svg>`);}
+function curMode(){const h=+RES[st.res].split(' x ')[1];for(let i=0;i<MODES.length;i++){const w=MODE_LINES[i]||+RES[0].split(' x ')[1];if(h===w)return i;}return -1;}
+function setMode(i){const w=MODE_LINES[i]||+RES[0].split(' x ')[1];let k=RES.findIndex(r=>r.endsWith(' '+w));if(k<0)k=RES.length-1;st.res=k;}
 const st=JSON.parse(JSON.stringify(DEF));let saved=JSON.parse(JSON.stringify(st));
-const F=['tabs',...ROWS.map((_,i)=>'row'+i),'res','music','sfx','accept','cancel'];   /* (120 fps: hidden for now) */
+const F=['tabs',...ROWS.map((_,i)=>'row'+i),'res','skip','mode','music','sfx','accept','cancel'];   /* (120 fps: hidden for now) */
 let f=0;
 function drawOpts(){
   opts.innerHTML='';const G=GEO,on=F[f];
   img(TEX.settingscontrolsbg1,G.ctrlhead,opts);img(TEX.settingscontrolsbg2,G.ctrllabels,opts);img(TEX.settingscontrolsbg3,G.ctrlvalues,opts);
-  img(TEX.settingsdisplaybg,G.display,opts);img(TEX.settingssoundbg,G.sound,opts);
-  img(TEX.settingsbackbut,G.accept,opts);img(TEX.settingsbackbut,G.cancel,opts);
+  const dn=(b,dy)=>[b[0],b[1]+dy,b[2],b[3]];
+  img(TEX.settingsdisplaybg,G.display,opts);img(TEX.settingssoundbg,[1043.7,368,930.7,272],opts);img(TEX.settingssoundbg,dn(G.sound,MROW),opts);
+  img(TEX.settingsbackbut,dn(G.accept,MROW),opts);img(TEX.settingsbackbut,dn(G.cancel,MROW),opts);
   text(T('Touch Controls'),0.5,WHITE,771,222,opts);text(T('Size'),0.42,WHITE,548,274,opts);
   for(let i=0;i<4;i++){const s=i===st.size;img(s?TEX.settingsplayerbutsel:TEX.settingsplayerbut,s?G.tabsel[i]:G.tabs[i],opts);
     text(T(SIZES[i]),0.4,s?WHITE:'#f8e8d8',676+i*114,274,opts);hit(624+i*114,250,728+i*114,296,opts,()=>{f=0;st.size=i;drawOpts();});}
@@ -202,19 +230,59 @@ function drawOpts(){
   img(on==='res'?TEX.settingsarrowleftsel:TEX.settingsarrowleft,G.arrowl,opts);img(on==='res'?TEX.settingsarrowrightsel:TEX.settingsarrowright,G.arrowr,opts);
   text(RES[st.res],0.47,WHITE,1624,297,opts,'#503808');
   hit(1396,256,1520,334,opts,()=>{f=F.indexOf('res');change(-1);});hit(1700,256,1852,334,opts,()=>{f=F.indexOf('res');change(1);});
-  text(T('Sound Options'),0.5,WHITE,1509,485,opts);
-  ['music','sfx'].forEach((k,i)=>{const y=555+i*72,focus=on===k;
+  /* frameskip: the game's own check box */
+  text(T('Frameskip'),0.42,on==='skip'?'#ffd040':WHITE,1278,372,opts);
+  img(st.skip?TEX.settingswindowbutsel:TEX.settingswindowbut,st.skip?G.checkon:G.check,opts);
+  hit(1150,340,1880,404,opts,()=>{if(f===F.indexOf('skip'))st.skip=!st.skip;f=F.indexOf('skip');drawOpts();});
+  /* Mode: its own plank, five buttons side by side */
+  const m=curMode();
+  text(T('Mode'),0.5,on==='mode'?'#ffd040':WHITE,1509,452,opts);   /* focus: the title in yellow */
+  if(m<0)text(T('Custom'),0.32,'#ffd040',1800,452,opts);
+  /* over the game (#ingame): the mode (a resolution) takes effect when the game starts again: said here, brighter once changed */
+  if(INGAME){const changed=st.res!==saved.res;text(T('Restart the game to apply the mode'),0.25,changed?'#ffd040':'#f8d8b8',1509,494,opts,changed?SHADOW:0);}
+  for(let i=0;i<5;i++){const x=1145+i*147,y=INGAME?480:470,w=138,h=150,sel=i===m;   /* (the plank is the middle half of its picture) */
+    img(sel?TEX.settingsplayerbutsel:TEX.settingsplayerbut,[x,y,w,h],opts);
+    /* the name only, centred on the plank: its picture's opaque part is x 3-61, y 15-46 of 64 */
+    text(T(MODES[i]),0.33,sel?WHITE:'#5a1408',x+w*32/64,y+h*30.5/64-1,opts,sel?SHADOW:0);
+    hit(x,y,x+w,y+h,opts,()=>{f=F.indexOf('mode');setMode(i);drawOpts();});}
+  text(T('Sound Options'),0.5,WHITE,1509,485+MROW,opts);
+  ['music','sfx'].forEach((k,i)=>{const y=555+MROW+i*72,focus=on===k;
     text(T(k==='music'?'Music Volume':'SFX Volume'),0.42,focus?WHITE:ORANGE,1305,y,opts);
-    img(focus?TEX.settingssliderbgsel:TEX.settingssliderbg,focus?G.slidersel[i]:G.slider[i],opts);
-    const kb=G.knob[i].slice();kb[0]=1474+st[k]*346-kb[2]/2+8;img(focus?TEX.settingsslidersel:TEX.settingsslider,kb,opts);
+    img(focus?TEX.settingssliderbgsel:TEX.settingssliderbg,dn(focus?G.slidersel[i]:G.slider[i],MROW),opts);
+    const kb=G.knob[i].slice();kb[0]=1474+st[k]*346-kb[2]/2+8;kb[1]+=MROW;img(focus?TEX.settingsslidersel:TEX.settingsslider,kb,opts);
     hit(1460,y-30,1860,y+35,opts,()=>{f=F.indexOf(k);});});
-  text(T('Accept'),0.52,on==='accept'?WHITE:ORANGE,1324,758,opts);text(T('Cancel'),0.52,on==='cancel'?WHITE:ORANGE,1703,758,opts);
-  hit(1158,720,1490,796,opts,accept);hit(1544,722,1862,794,opts,cancel);
+  text(T('Accept'),0.52,on==='accept'?WHITE:ORANGE,1324,758+MROW,opts);text(T('Cancel'),0.52,on==='cancel'?WHITE:ORANGE,1703,758+MROW,opts);
+  hit(1158,720+MROW,1490,796+MROW,opts,accept);hit(1544,722+MROW,1862,794+MROW,opts,cancel);
+  if(CH)drawChoice();
 }
+/* a choice over the screen (Game files, GPU driver): the planks higher up, the item under the cursor bigger and outlined,
+   the current one marked > < in yellow */
+let CH=null;
+function openChoice(title,items,mark,msg,cb){CH={title,items,mark,msg,cb,sel:Math.max(0,mark)};drawOpts();}
+/* the launcher's two lists (LauncherActivity.pickFiles / pickDriver), with their real entries */
+function openFiles(){openChoice('Game files',['Game folder','.zip file','GPU driver'],-1,null,w=>{if(w===2)openDriver();});}
+function openDriver(failed){openChoice('GPU driver',['System driver (Turnip off)','Turnip 26.3 R6','Download: Turnip 27.0 R3','Download: Turnip Mr. Purple T30 (Android 11+)','Import driver (.zip)'],1,
+  failed?'The last driver did not work; the system driver was used.':null,null);}
+function drawChoice(){const o=document.createElement('div');Object.assign(o.style,{position:'absolute',inset:0,background:'rgba(0,0,0,.93)'});opts.appendChild(o);
+  hit(0,0,2340,1080,opts,()=>{CH=null;drawOpts();});
+  const n=CH.items.length,step=Math.min(140,720/Math.max(1,n)),ph=Math.min(132,step-8),top=Math.max(60,200-(n-2)*30);
+  text(T(CH.title),0.7,WHITE,1170,top,opts);
+  if(CH.msg)text(T(CH.msg),0.36,ORANGE,1170,top+70,opts);
+  CH.items.forEach((it,i)=>{const y=top+180+i*step,on=i===CH.sel,gw=on?1010:920,gh=on?ph+18:ph;
+    if(on){const r=document.createElement('div'),m=`url(${TEX.settingsbackbut})`;   /* a yellow outline in the plank's own shape */
+      Object.assign(r.style,{position:'absolute',left:1170-gw/2-14+'px',top:y-gh/2-12+'px',width:gw+28+'px',height:gh+24+'px',background:'#ffd040',
+        webkitMaskImage:m,maskImage:m,webkitMaskSize:'100% 100%',maskSize:'100% 100%'});opts.appendChild(r);}
+    img(TEX.settingsbackbut,[1170-gw/2,y-gh/2,gw,gh],opts);
+    const lab=it.startsWith('Download: ')?T('Download')+': '+it.slice(10):T(it);
+    const s=(i===CH.mark?'> ':'')+lab+(i===CH.mark?' <':'');
+    text(s,on?0.56:0.46,on?WHITE:(i===CH.mark?'#ffd040':ORANGE),1170,y,opts);
+    hit(1170-gw/2,y-gh/2,1170+gw/2,y+gh/2,opts,()=>{if(CH.sel===i){const cb=CH.cb;CH=null;drawOpts();if(cb)cb(i);}else{CH.sel=i;drawOpts();}});});}
 function change(d){const on=F[f];
   if(on==='tabs')st.size=(st.size+d+4)%4;
   else if(on.startsWith('row')){const i=+on.slice(3),n=ROWS[i][1].length;
-    if(i===0)Object.assign(st,JSON.parse(JSON.stringify(DEF)));else st.rows[i]=(st.rows[i]+d+n)%n;}
+    if(i===0)Object.assign(st,JSON.parse(JSON.stringify(DEF)));else if(i===8){openFiles();return;}else st.rows[i]=(st.rows[i]+d+n)%n;}
+  else if(on==='skip')st.skip=!st.skip;
+  else if(on==='mode'){const m=curMode();setMode(((m<0?2:m)+d+5)%5);}
   else if(on==='res')st.res=(st.res+d+RES.length)%RES.length;
   else if(on==='fps')st.fps120=!st.fps120;
   else if(on==='music'||on==='sfx'){st[on]=Math.min(1,Math.max(0,Math.round((st[on]+d*0.1)*10)/10));}
@@ -274,4 +342,8 @@ window.portEvent=e=>{if(e==='game'){status='';show('home');}else if(e.startsWith
   screenRes();loadSettings();if(P)music();
   drawBrand();const h=location.hash.slice(1);show(['title','home','opts'].includes(h)?h:'title');setTimeout(()=>stage.classList.add('anim'),50);render();
 })();
+
+/* (review aid) #opts opens the Options screen, #choice also its Game files list */
+if(/^#(opts|choice|driver|ingame)/.test(location.hash)){const go=()=>{show('opts');if(INGAME)document.getElementById('bgMenu').style.filter='brightness(.45)';
+  if(location.hash==='#choice')openFiles();if(location.hash==='#driver')openDriver(true);};addEventListener('load',()=>setTimeout(go,50));}   /* after the page's own start (which shows the title) */
 </script></body></html>

@@ -19,6 +19,22 @@ sh tools/android/build_apk.sh           # private/android/rayman-origins-pc.apk 
 Needs NDK r28c, the Android SDK (build-tools 35, platform 35), JDK 17, an SDL3 3.4 Android build and source
 (`SDL3_ANDROID`, `SDL3_SRC`), the NDK's shaderc built once (`private/android/shaderc`).
 
+### DXVK on another PC
+
+`private/` is not in git: copy `private/deps/dxvk-mobile` (and `private/deps/libadrenotools`) from a PC that has them,
+or start again from dxvk-native `native-1.9.2b` with the mobile patches of the Sonic ASRT port and apply this port's
+patches in this order (`patch -p1` inside `private/deps/dxvk-mobile`):
+
+1. `tools/android/dxvk_mobile_gipa.patch` (the chosen driver's vkGetInstanceProcAddr)
+2. `tools/android/dxvk_mobile_passlog.patch` (render pass log, analysis)
+3. `tools/android/dxvk_mobile_lean.patch`, `tools/android/dxvk_mobile_lean_ff.patch` (lean shaders)
+4. `tools/android/dxvk_mobile_window.patch` (a new surface after leaving and coming back)
+5. `tools/android/dxvk_mobile_prerotate.patch` (pre-rotation)
+6. `tools/android/dxvk_mobile_overlay_fsr.patch` (touch layer at the screen's resolution, FSR 1.0 EASU)
+
+The new shaders' headers are made with `glslangValidator -V --vn <name> -o generated/<name>.h <file>` (names in the
+patches' headers), then `sh tools/android/build_dxvk_mobile.sh`.
+
 ## On the phone
 
 1. Install the APK (the [GitHub release](https://github.com/BelmanteGu/RaymanOriginsPCRecomp/releases)).

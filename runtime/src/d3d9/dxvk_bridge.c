@@ -102,6 +102,7 @@ int dxb_enabled(void) {
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!h) { fprintf(stderr, "usf: DXVK not loaded (%s): own renderer\n", dlerror()); return 0; }
     nat_create9 = (void *(*)(uint32_t))dlsym(h, "Direct3DCreate9");
+    { void dxb_overlay_init(void *lib); dxb_overlay_init(h); }   /* touch layer at the screen's resolution, FSR */
     if (!nat_create9) return 0;
     fprintf(stderr, "usf: Direct3D 9 through DXVK native (%s)\n", path);
     state = 1;
@@ -307,25 +308,12 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
         if (slot >= 81 && slot <= 84 && psrot_draw()) return 0;
         void rslog_state(uint32_t, uint32_t); void rslog_draw(uint32_t); static uint32_t cur_ps;   /* USF_RSLOG */
         if (slot == 57) rslog_state(ARG(1), ARG(2)); else if (slot == 107) cur_ps = ARG(1); else if (slot >= 81 && slot <= 84) rslog_draw(cur_ps);
+        void alphakill_draw(void *nat); if (slot >= 81 && slot <= 84) alphakill_draw(w->nat);   /* USF_ALPHAKILL */
     }
-    if (w->type == DXB_DEVICE && slot == 107 && ARG(1)) {   /* USF_SIMPLE_PS=1 (experiment): every pixel shader a minimal one */
-        static int simple = -1;
-        static void *ps;
-        if (simple < 0) simple = getenv("USF_SIMPLE_PS") != NULL;
-        if (simple) {
-            if (!ps) {                                   /* ps_2_0: dcl t0.xy; dcl_2d s0; texld r0, t0, s0; mov oC0, r0 */
-                static const uint32_t code[] = {0xFFFF0200, 0x0200001F, 0x80000000, 0xB0030000, 0x0200001F, 0x90000000,
-                    0xA00F0800, 0x03000042, 0x800F0000, 0xB0E40000, 0xA0E40800, 0x02000001, 0x800F0800, 0x80E40000,
-                    0x0000FFFF};
-                dxb_method(w->nat, 106)(w->nat, (uint64_t)(uintptr_t)code, (uint64_t)(uintptr_t)&ps, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-            }
-            if (ps) return (uint32_t)dxb_method(w->nat, 107)(w->nat, (uint64_t)(uintptr_t)ps, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        }
-    }
-    if (w->type == DXB_DEVICE && slot == 39) {          /* USF_NO_DEPTH=1 (experiment): the game's depth buffer unbound */
-        static int nodepth = -1;
-        if (nodepth < 0) nodepth = getenv("USF_NO_DEPTH") != NULL;
-        if (nodepth) return (uint32_t)dxb_method(w->nat, 39)(w->nat, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    if (w->type == DXB_DEVICE) {                         /* analysis switches (dxvk_psrot.c: dxb_analysis) */
+        int dxb_analysis(void *nat, int slot, uint32_t a, uint32_t *ret);
+        uint32_t r;
+        if (dxb_analysis(w->nat, slot, a, &r)) return r;
     }
     if (s[0] == '*') return special(c, a, w, slot);
     uint64_t x[11] = {0};
@@ -705,5 +693,8 @@ uint32_t dxb_create9(uint32_t sdk);
 uint32_t dxb_create9(uint32_t sdk) {
     void *d = nat_create9 ? nat_create9(sdk) : NULL;
     if (d) dxe_probe(d);                                 /* DXT on this GPU? (dxvk_bcemu.c) */
+#ifdef __ANDROID__
+    { void gpu_boost_start(void); if (d) gpu_boost_start(); }   /* the Adreno's slow state (gpu_boost.c) */
+#endif
     return d ? dxb_wrap(d, DXB_D3D9) : 0;
 }

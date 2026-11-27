@@ -123,7 +123,6 @@ void gpu_driver_prepare(void) {
     static int done;
     if (done++) return;
     PFN_vkGetInstanceProcAddr gipa = open_driver();
-    { void gpu_boost_start(void); gpu_boost_start(); }   /* the Adreno at its highest power level (gpu_boost.c) */
     if (!gipa) return;
     /* USF_GPU_TURBO=1 (test): ask the kernel's GPU driver (KGSL) to keep the Adreno at its highest clock, within its
      * thermal limits (libadrenotools; for any driver, the system's or Turnip) */
