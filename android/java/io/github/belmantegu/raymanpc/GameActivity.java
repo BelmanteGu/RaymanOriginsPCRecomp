@@ -77,6 +77,19 @@ public class GameActivity extends SDLActivity {
         android.os.Process.killProcess(android.os.Process.myPid());   /* the game's own process: nothing to keep */
     }
 
+    /* The slow state some phones keep the GPU in after start (Redmi 10C: 10 fps in the menu until the status bar was
+     * pulled down) is ended in the native side (gpu_boost.c); here only what the system is told. */
+    @Override
+    protected void onCreate(android.os.Bundle b) {
+        super.onCreate(b);
+        /* Android 13+: tell the system's game manager a game is being played (vendor game modes, e.g. MIUI's, read it) */
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            android.app.GameManager gm = getSystemService(android.app.GameManager.class);
+            if (gm != null) gm.setGameState(new android.app.GameState(false, android.app.GameState.MODE_GAMEPLAY_UNINTERRUPTIBLE));
+        }
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+
     /** from the game's thread: a touch button pressed with "Vibration" on */
     public void haptic() {
         runOnUiThread(() -> getWindow().getDecorView().performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY));

@@ -524,3 +524,25 @@ DXVK still built each of them into every shader behind specialization constants 
 fetch4 path away: lean sampling showed it). `DXVK_LEAN_FF=1` (tools/android/dxvk_mobile_lean_ff.patch, on by default
 with lean sampling) leaves them out: the sprite shader goes from 313 SPIR-V operations with an OpKill and 6
 branches to ~190 with neither; the same picture on the PC.
+
+## 2026-11-27 — The Redmi 10C's "10 fps until the status bar is pulled down", ended by the game itself
+
+- **Cause, measured:** with the same frame, Turnip's GPU timings showed 85 ms in the slow state and 25.7 ms after the
+  shade was pulled (both drivers, not thermal). MIUI's sysfs and Perfetto GPU events are closed to apps, so
+  runtime/src/gpu_boost.c reads the GPU's own cycle counters (KGSL perfcounter + CP_REG_TO_MEM in a command buffer of
+  its own, `USF_GPU_CLOCK=1`).
+- **Fix (gpu_boost.c, on by default where /dev/kgsl-3d0 exists; `gpuboost=0` in port_settings or `USF_GPU_BOOST=0`
+  turns it off):** a KGSL context of the game's own, made with the power-constraint flag, asks for the highest power
+  level and submits a 4-byte command buffer every 30 ms. Title screen, 3 runs each: **10.8 fps without, 35.8 with**;
+  the GPU then at 1115 MHz (its maximum), busy 100%. `USF_GPU_BOOST=2` (the same submissions, no constraint) gives
+  the same 36 fps: the periodic submissions alone end the state. libadrenotools' turbo (`USF_GPU_TURBO=1`) and
+  showing/hiding the system bars did not.
+- **Pre-rotation** (tools/android/dxvk_mobile_prerotate.patch): the swapchain in the display's orientation, DXVK's
+  blit rotating; SurfaceFlinger composes it in hardware (DEVICE, was CLIENT): 33.5 → 35.8 fps. HUD drawn on the back
+  buffer before the rotated blit.
+- Manifest: Android 11 minimum; `isGame`, `appCategory="game"`; Android 13+ `GameManager.setGameState`; screen kept on.
+- Ideas read in other Android ports (NFSU2/MW/Carbon, Oblivion, LEGO, Spider-Man, DMC3): all on the same dxvk-native
+  1.9.2b; none forces the Adreno clock without root; mininxd's NFSU2 documents the same "slow until the shade"
+  symptom (user workarounds: Game Turbo, no battery restrictions).
+- **Still open:** in the fast state the title screen's scene pass is 25.7 ms of GPU at full clock (sysmem rendering,
+  `tiled=false`, 45 bins): the work itself, ~20x what the fill rate allows. Next: where in the pass it goes.

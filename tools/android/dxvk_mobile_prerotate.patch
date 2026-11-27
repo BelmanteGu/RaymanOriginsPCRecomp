@@ -1,0 +1,203 @@
+# DXVK pre-rotation on Android (Rayman Origins PC port): the swapchain takes the surface's current transform (90/270 on
+# a phone held in landscape) and DXVK's blit to it rotates (dxvk_present_vert_rot90/270.vert; headers made with
+# glslangValidator -V --vn <name> into generated/), so SurfaceFlinger composes the layer in the display hardware
+# (DEVICE) instead of rotating it on the GPU (CLIENT). Redmi 10C menu: 33.5 -> 35.8 fps. DXVK_NO_PRETRANSFORM=1: off.
+--- a/src/d3d9/d3d9_swapchain.cpp
++++ b/src/d3d9/d3d9_swapchain.cpp
+@@ -840,11 +840,27 @@
+         {  int32_t(m_dstRect.left),                    int32_t(m_dstRect.top)                    },
+         { uint32_t(m_dstRect.right - m_dstRect.left), uint32_t(m_dstRect.bottom - m_dstRect.top) } };
+ 
++      // Port: a pre-rotated swap chain (Android): the HUD goes on the back buffer first (drawn after the blit it
++      // would come out sideways), then the whole image is drawn rotated
++      bool rotated = info.transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++      if (rotated && m_hud != nullptr) {
++        DxvkRenderTargets rts;
++        rts.color[0].view   = m_backBuffers[0]->GetRenderTargetView(false);
++        rts.color[0].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
++        m_context->bindRenderTargets(rts);
++        VkExtent3D e = rts.color[0].view->imageInfo().extent;
++        m_hud->render(m_context, VkSurfaceFormatKHR { rts.color[0].view->info().format, info.format.colorSpace },
++          VkExtent2D { e.width, e.height });
++      }
++      m_blitter->setTransform(info.transform);
++      if (info.transform != VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
++        dstRect = VkRect2D { { 0, 0 }, { 0, 0 } };
++
+       m_blitter->presentImage(m_context.ptr(),
+         m_imageViews.at(imageIndex), dstRect,
+         swapImageView, srcRect);
+ 
+-      if (m_hud != nullptr)
++      if (m_hud != nullptr && !rotated)
+         m_hud->render(m_context, info.format, info.imageExtent);
+ 
+       if (i + 1 >= SyncInterval)
+--- a/src/dxvk/dxvk_swapchain_blitter.cpp
++++ b/src/dxvk/dxvk_swapchain_blitter.cpp
+@@ -5,6 +5,8 @@
+ #include <dxvk_present_frag_ms.h>
+ #include <dxvk_present_frag_ms_amd.h>
+ #include <dxvk_present_vert.h>
++#include <dxvk_present_vert_rot90.h>
++#include <dxvk_present_vert_rot270.h>
+ 
+ namespace dxvk {
+   
+@@ -44,7 +46,8 @@
+         srcView->imageInfo().extent.height };
+     }
+ 
+-    bool sameSize = dstRect.extent == srcRect.extent;
++    bool rotated = m_transform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR || m_transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
++    bool sameSize = dstRect.extent == srcRect.extent && !rotated;
+     bool usedResolveImage = false;
+ 
+     if (srcView->imageInfo().sampleCount == VK_SAMPLE_COUNT_1_BIT) {
+@@ -177,13 +180,15 @@
+     ctx->bindResourceView(BindingIds::Image, srcView, nullptr);
+     ctx->bindResourceView(BindingIds::Gamma, m_gammaView, nullptr);
+ 
+-    ctx->bindShader(VK_SHADER_STAGE_VERTEX_BIT, m_vs);
++    ctx->bindShader(VK_SHADER_STAGE_VERTEX_BIT,
++      m_transform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR  ? m_vsRot90 :
++      m_transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR ? m_vsRot270 : m_vs);
+     ctx->bindShader(VK_SHADER_STAGE_FRAGMENT_BIT, fs);
+ 
+     PresenterArgs args;
+     args.srcOffset = srcRect.offset;
+ 
+-    if (dstRect.extent == srcRect.extent)
++    if (dstRect.extent == srcRect.extent && m_transform == VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+       args.dstOffset = dstRect.offset;
+     else
+       args.srcExtent = srcRect.extent;
+@@ -292,6 +297,8 @@
+ 
+   void DxvkSwapchainBlitter::createShaders() {
+     const SpirvCodeBuffer vsCode(dxvk_present_vert);
++    const SpirvCodeBuffer vsCodeRot90(dxvk_present_vert_rot90);
++    const SpirvCodeBuffer vsCodeRot270(dxvk_present_vert_rot270);
+     const SpirvCodeBuffer fsCodeBlit(dxvk_present_frag_blit);
+     const SpirvCodeBuffer fsCodeCopy(dxvk_present_frag);
+     const SpirvCodeBuffer fsCodeResolve(dxvk_present_frag_ms);
+@@ -306,6 +313,14 @@
+       VK_SHADER_STAGE_VERTEX_BIT,
+       0, nullptr, { 0u, 1u },
+       vsCode);
++    m_vsRot90 = m_device->createShader(
++      VK_SHADER_STAGE_VERTEX_BIT,
++      0, nullptr, { 0u, 1u },
++      vsCodeRot90);
++    m_vsRot270 = m_device->createShader(
++      VK_SHADER_STAGE_VERTEX_BIT,
++      0, nullptr, { 0u, 1u },
++      vsCodeRot270);
+     
+     m_fsBlit = m_device->createShader(
+       VK_SHADER_STAGE_FRAGMENT_BIT,
+--- a/src/dxvk/dxvk_swapchain_blitter.h
++++ b/src/dxvk/dxvk_swapchain_blitter.h
+@@ -50,6 +50,9 @@
+      * \param [in] cpCount Number of control points
+      * \param [in] cpData Control point data
+      */
++    /** Port: the swap chain's pre-rotation (VkSurfaceTransformFlagBitsKHR): the image is drawn rotated */
++    void setTransform(uint32_t transform) { m_transform = transform; }
++
+     void setGammaRamp(
+             uint32_t            cpCount,
+       const DxvkGammaCp*        cpData);
+@@ -75,6 +78,9 @@
+     Rc<DxvkShader>      m_fsBlit;
+     Rc<DxvkShader>      m_fsResolve;
+     Rc<DxvkShader>      m_vs;
++    Rc<DxvkShader>      m_vsRot90;
++    Rc<DxvkShader>      m_vsRot270;
++    uint32_t            m_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+ 
+     Rc<DxvkImage>       m_gammaImage;
+     Rc<DxvkImageView>   m_gammaView;
+--- a/src/vulkan/vulkan_presenter.cpp
++++ b/src/vulkan/vulkan_presenter.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ #include "vulkan_presenter.h"
+ 
+ #include "../dxvk/dxvk_format.h"
+@@ -161,6 +162,20 @@
+     m_info.format       = pickFormat(formats.size(), formats.data(), desc.numFormats, desc.formats);
+     m_info.presentMode  = pickPresentMode(modes.size(), modes.data(), desc.numPresentModes, desc.presentModes);
+     m_info.imageExtent  = pickImageExtent(caps, desc.imageExtent);
++    m_info.transform    = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++#ifdef __ANDROID__
++    {   // Port: pre-rotation. With the identity transform a phone's compositor (without a rotating overlay, e.g. the
++        // Adreno 610's) rotates every frame with the GPU the game needs (seen: composition CLIENT, ROT_270).
++      const VkSurfaceTransformFlagsKHR rot = VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
++      const char* off = std::getenv("DXVK_NO_PRETRANSFORM");
++      if ((caps.currentTransform & rot) && (caps.supportedTransforms & caps.currentTransform) && !(off && *off == '1')) {
++        m_info.transform = caps.currentTransform;
++        m_info.imageExtent = { m_info.imageExtent.height, m_info.imageExtent.width };
++        if (caps.currentExtent.width != ~0u)
++          m_info.imageExtent = { caps.currentExtent.height, caps.currentExtent.width };
++      }
++    }
++#endif
+     m_info.imageCount   = pickImageCount(caps, m_info.presentMode, desc.imageCount);
+ 
+     if (!m_info.imageExtent.width || !m_info.imageExtent.height) {
+@@ -189,7 +204,7 @@
+     swapInfo.imageSharingMode       = VK_SHARING_MODE_EXCLUSIVE;
+     swapInfo.queueFamilyIndexCount  = 0;
+     swapInfo.pQueueFamilyIndices    = nullptr;
+-    swapInfo.preTransform           = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++    swapInfo.preTransform           = m_info.transform;
+     swapInfo.compositeAlpha         = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+     swapInfo.presentMode            = m_info.presentMode;
+     swapInfo.clipped                = VK_TRUE;
+--- a/src/vulkan/vulkan_presenter.h
++++ b/src/vulkan/vulkan_presenter.h
+@@ -41,6 +41,9 @@
+     VkPresentModeKHR    presentMode;
+     VkExtent2D          imageExtent;
+     uint32_t            imageCount;
++    // Port: the swap chain's pre-rotation (Android, a landscape game on a portrait display: the image is made in
++    // the display's own orientation, so the compositor shows it as it is instead of rotating it on the GPU)
++    VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+   };
+ 
+   /**
+--- /dev/null
++++ b/src/dxvk/shaders/dxvk_present_vert_rot90.vert
+@@ -0,0 +1,14 @@
++#version 450
++
++// Port: the present quad for a swap chain pre-rotated by 90 degrees (Android: the display's own orientation, so
++// the compositor shows it as it is instead of rotating every frame on the GPU)
++layout(location = 0) out vec2 o_coord;
++
++void main() {
++  vec2 coord = vec2(
++    float(gl_VertexIndex & 2),
++    float(gl_VertexIndex & 1) * 2.0f);
++
++  o_coord = vec2(coord.y, 1.0f - coord.x);
++  gl_Position = vec4(-1.0f + 2.0f * coord, 0.0f, 1.0f);
++}
+--- /dev/null
++++ b/src/dxvk/shaders/dxvk_present_vert_rot270.vert
+@@ -0,0 +1,14 @@
++#version 450
++
++// Port: the present quad for a swap chain pre-rotated by 270 degrees (Android: the display's own orientation, so
++// the compositor shows it as it is instead of rotating every frame on the GPU)
++layout(location = 0) out vec2 o_coord;
++
++void main() {
++  vec2 coord = vec2(
++    float(gl_VertexIndex & 2),
++    float(gl_VertexIndex & 1) * 2.0f);
++
++  o_coord = vec2(1.0f - coord.y, coord.x);
++  gl_Position = vec4(-1.0f + 2.0f * coord, 0.0f, 1.0f);
++}

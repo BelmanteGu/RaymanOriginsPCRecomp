@@ -45,7 +45,7 @@ static PFN_vkGetInstanceProcAddr open_driver(void) {
     snprintf(trial, sizeof trial, "%s/trial", root);
     snprintf(failed, sizeof failed, "%s/failed", root);
     void *lib = NULL;
-    FILE *f = fopen(selected, "r");
+    FILE *f = getenv("USF_GPU_DRIVER") && !strcmp(getenv("USF_GPU_DRIVER"), "system") ? NULL : fopen(selected, "r");   /* (tests) */
     if (f) {
         char folder[128] = "", file[128] = "";
         if (!fgets(folder, sizeof folder, f)) folder[0] = 0;
@@ -123,7 +123,11 @@ void gpu_driver_prepare(void) {
     static int done;
     if (done++) return;
     PFN_vkGetInstanceProcAddr gipa = open_driver();
+    { void gpu_boost_start(void); gpu_boost_start(); }   /* the Adreno at its highest power level (gpu_boost.c) */
     if (!gipa) return;
+    /* USF_GPU_TURBO=1 (test): ask the kernel's GPU driver (KGSL) to keep the Adreno at its highest clock, within its
+     * thermal limits (libadrenotools; for any driver, the system's or Turnip) */
+    if (getenv("USF_GPU_TURBO")) { adrenotools_set_turbo(true); fprintf(stderr, "usf: GPU turbo on\n"); }
     if (!custom) enable_bcn(gipa);
     char hex[32];
     snprintf(hex, sizeof hex, "%llx", (unsigned long long)(uintptr_t)gipa);
