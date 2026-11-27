@@ -37,7 +37,7 @@ This one starts from the **PC build** because that is the copy people can still 
 | ✅ **60 / 120 fps** | paced Present; 120 = the engine's own logic rate at 120 (real steps, not interpolation) |
 | ✅ **Sound and movies** | XAudio2 (PCM, MS ADPCM); Bink movies through FFmpeg, with their soundtrack |
 | ✅ **Touch** | on-screen controls and the port's settings drawn in the game (under the game's pause menu) |
-| ✅ **Android** | runs on the Galaxy S23 (arm64, DXVK for Vulkan 1.1), touch controls with the Xbox 360 port's drawings |
+| ✅ **Android** | Android 11 or newer, arm64 with Vulkan 1.1 (DXVK); runs on the Galaxy S23, touch controls with the Xbox 360 port's drawings |
 | ✅ **Light copy** | the game in 560 MB instead of 2.4 GB (sounds as Opus, the rest byte for byte): [docs/LIGHT_COPY.md](docs/LIGHT_COPY.md) |
 | ✅ **Controllers** | any SDL gamepad (USB / Bluetooth) as an XInput pad, plugged before or after start |
 
