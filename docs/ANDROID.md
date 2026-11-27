@@ -4,7 +4,8 @@ The same lifted C as the PC build, compiled with the NDK for arm64, with the run
 only) linked into `libmain.so`. Direct3D 9 goes to `libdxvk_d3d9.so`: dxvk-native 1.9.2b with mobile-GPU patches, its
 window system moved to SDL3 (Vulkan 1.1; `private/deps/dxvk-mobile`, from the Sonic & All-Stars Racing Transformed
 port), loaded next to `libmain.so` by the same bridge as on the PC. The game files are the user's own PC copy, read in
-place from the phone's storage. Status: **runs on the Galaxy S23** (2026-11-19, played by the user).
+place from the phone's storage. How it reached 60 fps at 720 lines on an Adreno 618, step by step:
+[ANDROID-PERFORMANCE.md](ANDROID-PERFORMANCE.md). Status: **runs on the Galaxy S23** (2026-11-19, played by the user).
 
 ## Build
 
@@ -31,6 +32,9 @@ patches in this order (`patch -p1` inside `private/deps/dxvk-mobile`):
 4. `tools/android/dxvk_mobile_window.patch` (a new surface after leaving and coming back)
 5. `tools/android/dxvk_mobile_prerotate.patch` (pre-rotation)
 6. `tools/android/dxvk_mobile_overlay_fsr.patch` (touch layer at the screen's resolution, FSR 1.0 EASU)
+7. `tools/android/dxvk_mobile_nocentroid.patch` (no centroid on ps < 3 inputs: 2.7x slower per pixel on the Adreno)
+8. `tools/android/dxvk_mobile_adreno_perf.patch` (framebuffer cache, the window's buffers at the game's size, fragment-only
+   barriers, no blending where a format cannot blend)
 
 The new shaders' headers are made with `glslangValidator -V --vn <name> -o generated/<name>.h <file>` (names in the
 patches' headers), then `sh tools/android/build_dxvk_mobile.sh`.

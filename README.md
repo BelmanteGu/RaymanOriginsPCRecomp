@@ -42,7 +42,8 @@ This one starts from the **PC build** because that is the copy people can still 
 | ✅ **Controllers** | any SDL gamepad (USB / Bluetooth) as an XInput pad, plugged before or after start |
 
 Download (Android): [release 1.0](https://github.com/BelmanteGu/RaymanOriginsPCRecomp/releases/tag/v1.0) ·
-Log: [docs/PROGRESS.md](docs/PROGRESS.md) · Android: [docs/ANDROID.md](docs/ANDROID.md) · plan:
+Log: [docs/PROGRESS.md](docs/PROGRESS.md) · Android: [docs/ANDROID.md](docs/ANDROID.md) · Android performance:
+[docs/ANDROID-PERFORMANCE.md](docs/ANDROID-PERFORMANCE.md) · plan:
 [docs/PLAN.md](docs/PLAN.md) · rules: [docs/RULES.md](docs/RULES.md)
 
 ## The light copy: 2.4 GB → 560 MB

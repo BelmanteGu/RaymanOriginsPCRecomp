@@ -604,3 +604,24 @@ absolute times.
   nothing (or `gpuboost=1`). Still to be measured on the Redmi 10C against the slow state (10.8 vs ~36 fps).
 - dxvk_bridge.c back to 700 lines: the analysis switches (USF_OVERDRAW, NOBLEND, LODBIAS, SIMPLE_PS, NO_DEPTH) moved
   to dxvk_psrot.c (`dxb_analysis`).
+
+## 2026-11-27 — 720 lines at 60 fps on the Adreno 618 (Galaxy Tab S6 Lite)
+
+The full account, with every measurement, switch and file: [ANDROID-PERFORMANCE.md](ANDROID-PERFORMANCE.md).
+
+- **No centroid on ps < 3 inputs** (tools/android/dxvk_mobile_nocentroid.patch): DXVK decorated every `ps_2_0` colour
+  input as Centroid, 2.7x slower per pixel on Qualcomm's driver without MSAA. Title screen at 1280x720: 24.2 → 35.5 fps.
+- **FSR off by default**, a check box in the launcher: EASU was ~85% of the GPU's ALU work. 36.0 → 48.9 fps.
+- **The display enlarges, the controls have their own surface**: the swap chain at the game's size (`DXVK_HWC_SIZE`,
+  ANativeWindow_setBuffersGeometry) and the touch controls on a SurfaceView drawn by a thread of their own. 720 lines:
+  48.5 → 57.5 fps.
+- **The game fills the screen**: UbiArt's `x * 9 >> 4` fit at 95 places, replaced in the lifter with the screen's
+  shape when it is narrower than 16:9 (`USF_LETTERBOX=1` keeps the bars). The partial clear (a 1.1 ms LOAD pass), two
+  StretchRects and the bars pass are gone. 57.5 → 60 fps.
+- **Framebuffer cache in DXVK** (tools/android/dxvk_mobile_adreno_perf.patch): a VkFramebuffer per render-target change
+  was a kernel allocation on Qualcomm's driver, 13% of the game's CPU in play. Game thread 16–20 → 10–12 ms a frame.
+- **The stick no longer stalls the game**: the touch layer drew under the lock the game thread takes for every finger
+  move; now the state is copied, only the changed rectangle is drawn (pre-scaled sprites), and only what each window
+  buffer lacks is copied (buffer age).
+- Also: fragment-only barriers, no blending into formats that cannot blend, the state cache in the data folder, a
+  per-pass GPU timer; tools/android/perf_ab.sh and tools/android/vkbench for measuring on the device.
