@@ -35,7 +35,7 @@ import java.util.List;
  * into the app's folder); with a game: PLAY and CHANGE GAME FILES. Touch or a pad (up/down, A/Enter, B/Back).
  */
 public class LauncherActivity extends Activity {
-    private static final int REQ_FOLDER = 1, REQ_ZIP = 2, REQ_DRIVER = 3;
+    private static final int REQ_FOLDER = 1, REQ_ZIP = 2, REQ_DRIVER = 3, REQ_SAVE_EXPORT = 4, REQ_SAVE_IMPORT = 5;
 
     private MenuStyle st;
     private LinearLayout menu;
@@ -235,9 +235,77 @@ public class LauncherActivity extends Activity {
     /** the game's look: a folder (read in place, then made light) or a .zip (of the game or of the light copy) */
     private void pickFiles() {
         if (game == null) { pickFolder(); return; }
-        game.choose("Game files", null, new String[] {"Game folder", ".zip file", "GPU driver"}, -1, w -> {
-            if (w == 0) pickFolder(); else if (w == 1) pickZip(); else if (w == 2) pickDriver();
+        game.choose("Game files", null, new String[] {"Game folder", ".zip file", "GPU driver", "Save game"}, -1, w -> {
+            if (w == 0) pickFolder(); else if (w == 1) pickZip(); else if (w == 2) pickDriver(); else if (w == 3) pickSave();
         });
+    }
+
+    /** The game's save to and from the PC (SaveTransfer): export it as "Savegame_0" (on the PC it goes in
+     *  Documents\My Games\Rayman Origins\Savegame), import one (the PC's Savegame_0, or a .zip with it), or put back
+     *  the save an import replaced. */
+    private void pickSave() {
+        File data = dataDir();
+        java.util.List<Integer> have = new java.util.ArrayList<>(), backed = new java.util.ArrayList<>();
+        for (int k = 0; k < SaveTransfer.SLOTS; k++) {
+            if (SaveTransfer.read(SaveTransfer.file(data, k)) != null) have.add(k);
+            if (SaveTransfer.backup(data, k).isFile()) backed.add(k);
+        }
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> acts = new java.util.ArrayList<>();
+        if (!have.isEmpty()) {
+            labels.add("Export save");
+            acts.add(() -> {
+                if (have.size() == 1) { exportSlot(have.get(0)); return; }
+                String[] items = new String[have.size()];
+                for (int i = 0; i < items.length; i++) items[i] = slotLabel(have.get(i));
+                game.choose("Export save", null, items, -1, w -> { if (w >= 0) exportSlot(have.get(w)); });
+            });
+        }
+        labels.add("Import save");
+        acts.add(() -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            startActivityForResult(i, REQ_SAVE_IMPORT);
+        });
+        if (!backed.isEmpty()) {
+            labels.add("Restore the previous save");
+            acts.add(() -> {
+                stopGame();
+                boolean ok = true;
+                for (int k : backed) ok &= SaveTransfer.restore(data, k);
+                toast(game.text(ok ? "Previous save restored" : "The save could not be written"));
+            });
+        }
+        String msg = have.isEmpty() ? "No save yet" : have.size() == 1 ? slotLabel(have.get(0)) : null;
+        game.choose("Save game", msg, labels.toArray(new String[0]), -1, w -> { if (w >= 0) acts.get(w).run(); });
+    }
+    private void exportSlot(int k) {
+        prefs().edit().putInt("exportSlot", k).apply();      /* (kept if the activity is remade under the picker) */
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/octet-stream");
+        i.putExtra(Intent.EXTRA_TITLE, SaveTransfer.name(k));        /* the PC's own name: it goes in as it is */
+        startActivityForResult(i, REQ_SAVE_EXPORT);
+    }
+    /** "File 2: 246/246 Electoons 10/10 Teeth" */
+    private String slotLabel(int k) {
+        byte[] d = SaveTransfer.read(SaveTransfer.file(dataDir(), k));
+        return game.text("File") + " " + (k + 1) + (d != null ? ": " + saveSummary(d) : "");
+    }
+    private String saveSummary(byte[] d) { return SaveTransfer.summary(d, game.text("Teeth")); }
+
+    /** the game's process (":game"), if it is still alive: ended before its save is replaced, so it cannot write the
+     *  old progress back over the new one */
+    private void stopGame() {
+        android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        java.util.List<android.app.ActivityManager.RunningAppProcessInfo> ps = am == null ? null : am.getRunningAppProcesses();
+        if (ps == null) return;
+        for (android.app.ActivityManager.RunningAppProcessInfo p : ps)
+            if (p.processName.equals(getPackageName() + ":game")) {
+                android.os.Process.killProcess(p.pid);
+                try { Thread.sleep(300); } catch (InterruptedException e) { /* on */ }
+            }
     }
 
     /** The Vulkan driver (GpuDrivers): the system's, a driver unpacked earlier, one of the catalog's downloaded
@@ -317,6 +385,20 @@ public class LauncherActivity extends Activity {
                 String err = GpuDrivers.importZip(this, u);
                 runOnUiThread(() -> { game.showBusy(null); toast(err != null ? err : game.text("GPU driver") + " OK"); });
             }).start();
+        } else if (req == REQ_SAVE_EXPORT && game != null) {
+            Uri u = data.getData();
+            byte[] d = SaveTransfer.read(SaveTransfer.file(dataDir(), prefs().getInt("exportSlot", 0)));
+            toast(game.text(d != null && SaveTransfer.write(getContentResolver(), u, d) ? "Save exported" : "The save could not be written"));
+        } else if (req == REQ_SAVE_IMPORT && game != null) {
+            SaveTransfer.Found f = SaveTransfer.read(getContentResolver(), data.getData());
+            if (f == null) { toast(game.text("This is not a Rayman Origins save")); return; }
+            boolean taken = SaveTransfer.file(dataDir(), f.slot).isFile();
+            game.choose(taken ? "Replace your save with this one?" : "Import save",
+                        game.text("File") + " " + (f.slot + 1) + ": " + saveSummary(f.data), new String[] {"Accept", "Cancel"}, -1, w -> {
+                if (w != 0) return;
+                stopGame();
+                toast(game.text(SaveTransfer.install(dataDir(), f.slot, f.data) ? "Save imported" : "The save could not be written"));
+            });
         } else if (req == REQ_ZIP && game != null) {
             importZipGame(data.getData());
         } else if (req == REQ_ZIP) {

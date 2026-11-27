@@ -62,4 +62,22 @@ newer works) and "Import driver (.zip)" for a pack of one's own (meta.json + the
 The choice applies at the next start; a driver that never draws sends the game back to the system's at the start
 after, and the launcher says so.
 
+**Saves to and from the PC**: Game files → Save game. The port keeps the game's save where the PC game does
+(`Documents\My Games\Rayman Origins\Savegame\`, under the app's data folder in `drive_c`), and the file is the same
+on both: same executable, same format, nothing tied to the machine or the user.
+
+- **Export save** writes `Savegame_0` (or `_1`, `_2`: the game's three files, chosen when more than one is used)
+  wherever the system's file picker points: Downloads, Drive, a USB stick. On the PC it goes, unchanged, in
+  `Documents\My Games\Rayman Origins\Savegame\` (inside OneDrive when Documents is synced there).
+- **Import save** takes the PC's `Savegame_N`, or a .zip holding it (a .7z must be unpacked first). It checks that the
+  file is a save of this game (bytes `46 CB 43 0E` at 0x208), shows its progress ("File 1: 246/246 Electoons 10/10
+  Teeth") and asks before replacing. The file goes to the slot its name says (`Savegame_1` to the second, a name
+  without a number to the first). If the game is still running in the background, it is ended first, so it cannot
+  write the old progress back.
+- **Restore the previous save** appears after an import: the replaced save was kept as `Savegame_N.bak`, and this
+  swaps the two (pressed again, it redoes the import).
+
+Checked on the Galaxy Tab S6 Lite with a save made on Windows: imported, the game's "Select a file." showed 246/246 and
+10/10 and the world map opened fully unlocked; exported, the file came out byte for byte the same.
+
 A physical controller works too (any SDL gamepad, read by the game as an XInput pad).

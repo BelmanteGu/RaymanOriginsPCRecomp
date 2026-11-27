@@ -625,3 +625,17 @@ The full account, with every measurement, switch and file: [ANDROID-PERFORMANCE.
   buffer lacks is copied (buffer age).
 - Also: fragment-only barriers, no blending into formats that cannot blend, the state cache in the data folder, a
   per-pass GPU timer; tools/android/perf_ab.sh and tools/android/vkbench for measuring on the device.
+
+## 2026-11-27 — Saves to and from the PC
+
+- **Launcher: Game files → Save game** (SaveTransfer.java): export the game's save, import one, restore the one an
+  import replaced. The save is the PC game's own file (`Documents\My Games\Rayman Origins\Savegame\Savegame_N`, mapped
+  under `<data>/drive_c` by hle_k32_file.c): same executable, same format, so it is only copied. Nothing in it is tied
+  to the machine or the user: `GetUserNameW` only feeds an "unknown user" text, `GetAdaptersAddresses` is called from
+  the online library, and neither name nor address is in the file.
+- The file: 512 bytes of UTF-16 text for the slot ("246/246 [icon:GPE_ELECTOON]  10/10 [icon:GPE_TOOTH]"), then
+  UbiArt's serialized progress starting with `46 CB 43 0E` at 0x208, the check that a picked file is a save.
+- Three slots, Savegame_0 to _2; an imported file goes to the slot its name says. The game's process is ended before
+  an import or restore, so it cannot write over the new save. The replaced save is kept as `.bak`.
+- Checked on the Galaxy Tab S6 Lite with a 100% save made on Windows: the slot showed 246/246 and 10/10 and the world
+  map opened unlocked; the export came out byte for byte the same; restore swapped both ways.
