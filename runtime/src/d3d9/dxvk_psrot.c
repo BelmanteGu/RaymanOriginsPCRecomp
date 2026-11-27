@@ -80,3 +80,22 @@ void rslog_draw(uint32_t ps) {
     for (int i = 0; i < 6; i++) rs_on[i] = 0;
     rs_t0 = now;
 }
+
+/* USF_ALPHAKILL=1 (experiment, weak mobile GPUs): pixels that change nothing never reach the render backend. On the
+ * Adreno 610 the render backend is the limit (KGSL counters: busy 99.8%, the shaders stalled on it; ~11 layers a
+ * pixel on the title screen). With blending SRCALPHA -> INVSRCALPHA or ONE (no separate alpha blend), a pixel of
+ * alpha 0 leaves the target as it was, so D3D9's own alpha test (alpha > 0) is turned on for those draws and DXVK
+ * discards them in the shader: the same picture. Needs the alpha test in DXVK's shaders (DXVK_LEAN_FF=0). */
+void alphakill_draw(void *nat) {
+    static int on = -1, set;
+    if (on < 0) on = getenv("USF_ALPHAKILL") && *getenv("USF_ALPHAKILL") == '1';
+    if (!on) return;
+    int want = rs[27] && rs[19] == 5 && (rs[20] == 6 || rs[20] == 2) && !rs[206] && !rs[15];
+    if (want == set) return;
+    if (want) {
+        dxb_method(nat, 57)(nat, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);      /* ALPHAREF 0 */
+        dxb_method(nat, 57)(nat, 25, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0);      /* ALPHAFUNC GREATER */
+    }
+    dxb_method(nat, 57)(nat, 15, (uint64_t)want, 0, 0, 0, 0, 0, 0, 0, 0, 0);   /* ALPHATESTENABLE */
+    set = want;
+}

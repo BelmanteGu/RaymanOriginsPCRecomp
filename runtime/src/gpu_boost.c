@@ -59,22 +59,37 @@ struct kgsl_pc_get { unsigned int groupid, countable, offset, offset_hi, pad; };
 static unsigned parity(unsigned v) { v ^= v >> 16; v ^= v >> 8; v ^= v >> 4; return (~(0x6996u >> (v & 0xf))) & 1; }
 static uint32_t pkt7(unsigned op, unsigned cnt) { return 0x70000000u | cnt | parity(cnt) << 15 | (op & 0x7f) << 16 | parity(op) << 23; }
 
-/* the counters' copy into the IB's memory (USF_GPU_CLOCK); returns the dwords written */
+/* the counters' copy into the IB's memory (USF_GPU_CLOCK); returns the dwords written. Slot 0: RBBM always-count (GPU
+ * cycles), 1: CP busy, 2: the always-on counter, then USF_GPU_COUNTERS="<group>:<countable>,..." (KGSL group ids:
+ * UCHE 8, TP 9, SP 10, RB 11, VBIF/GBIF 13, CCU 24, LRZ 25; countables: Mesa's a6xx_perfcntrs.xml) */
+#define MAXC 32
+static unsigned nc, cgrp[MAXC], ccnt[MAXC];
 static unsigned clock_ib(int fd, uint32_t *ib, unsigned long gpuaddr) {
-    unsigned grp[2] = {0x1, 0x0}, cnt[2] = {0, 2}, reg[3] = {0, 0, A6XX_CP_ALWAYS_ON_COUNTER}, n = 0;
-    for (int i = 0; i < 2; i++) {
-        struct kgsl_pc_get g = {grp[i], cnt[i], 0, 0, 0};
-        if (ioctl(fd, IOCTL_KGSL_PERFCOUNTER_GET, &g)) fprintf(stderr, "usf: gpu clock: counter refused (%d)\n", errno);
+    unsigned reg[MAXC] = {0}, n = 0;
+    cgrp[0] = 0x1; ccnt[0] = 0; cgrp[1] = 0x0; ccnt[1] = 2; nc = 3;
+    const char *l = getenv("USF_GPU_COUNTERS");
+    while (l && *l && nc < MAXC) {
+        unsigned g, c; int used = 0;
+        if (sscanf(l, "%u:%u%n", &g, &c, &used) != 2) break;
+        cgrp[nc] = g; ccnt[nc] = c; nc++;
+        l += used;
+        if (*l == ',') l++;
+    }
+    for (unsigned i = 0; i < nc; i++) {
+        if (i == 2) { reg[i] = A6XX_CP_ALWAYS_ON_COUNTER; continue; }
+        struct kgsl_pc_get g = {cgrp[i], ccnt[i], 0, 0, 0};
+        if (ioctl(fd, IOCTL_KGSL_PERFCOUNTER_GET, &g)) fprintf(stderr, "usf: gpu clock: counter %u:%u refused (%d)\n", cgrp[i], ccnt[i], errno);
         else reg[i] = g.offset;
     }
-    for (int i = 0; i < 3; i++) {
+    for (unsigned i = 0; i < nc; i++) {
         uint64_t dst = gpuaddr + 2048 + 8 * i;
+        if (!reg[i]) continue;
         ib[n++] = pkt7(CP_REG_TO_MEM, 3);
         ib[n++] = reg[i] | 2u << 18 | 1u << 30;          /* 2 registers, 64-bit */
         ib[n++] = (uint32_t)dst;
         ib[n++] = (uint32_t)(dst >> 32);
     }
-    fprintf(stderr, "usf: gpu clock: counters at %#x %#x\n", reg[0], reg[1]);
+    fprintf(stderr, "usf: gpu clock: %u counters\n", nc);
     return n;
 }
 
@@ -98,19 +113,24 @@ static void *boost_loop(void *arg) {
     volatile uint64_t *out = (volatile uint64_t *)(ib + 512);
     fprintf(stderr, "usf: GPU boost: context %u (constraint %s), %u dwords every 30 ms\n", cc.id, set ? "off" : "set", n);
     int fails = 0;
-    uint64_t last[3] = {0, 0, 0};
+    uint64_t last[MAXC] = {0};
     for (unsigned k = 0;; k++) {
         struct kgsl_cmd_obj o = {0, a.gpuaddr, 4 * n, KGSL_CMDLIST_IB, a.id};
         struct kgsl_gpu_cmd g = {constrain ? KGSL_CMDBATCH_PWR_CONSTRAINT : 0, (uintptr_t)&o, sizeof o, 1, 0, 0, 0, 0, 0, 0, cc.id, 0};
         if (ioctl(fd, IOCTL_KGSL_GPU_COMMAND, &g) && fails++ < 3) fprintf(stderr, "usf: GPU boost: submit failed (%d)\n", errno);
         usleep(30000);
         if (n > 1 && k % 66 == 65) {                     /* every ~2 s */
-            uint64_t v[3] = {out[0], out[1], out[2]};
-            double t = (double)(v[2] - last[2]) / 19.2e6;
-            if (last[2] && t > 0)
+            uint64_t v[MAXC];
+            for (unsigned i = 0; i < nc; i++) v[i] = out[i];
+            double t = (double)(v[2] - last[2]) / 19.2e6, cyc = (double)(v[0] - last[0]);
+            if (last[2] && t > 0 && cyc > 0) {
                 fprintf(stderr, "usf: gpu clock: %.0f MHz average over %.1f s, CP busy %.0f%% of those cycles\n",
-                        (double)(v[0] - last[0]) / t / 1e6, t, v[0] > last[0] ? 100.0 * (double)(v[1] - last[1]) / (double)(v[0] - last[0]) : 0);
-            for (int i = 0; i < 3; i++) last[i] = v[i];
+                        cyc / t / 1e6, t, 100.0 * (double)(v[1] - last[1]) / cyc);
+                for (unsigned i = 3; i < nc; i++)
+                    fprintf(stderr, "usf: gpu counter %u:%u: %.1f%% of GPU cycles, %.2f M a second\n", cgrp[i], ccnt[i],
+                            100.0 * (double)(v[i] - last[i]) / cyc, (double)(v[i] - last[i]) / t / 1e6);
+            }
+            for (unsigned i = 0; i < nc; i++) last[i] = v[i];
         }
     }
     return NULL;

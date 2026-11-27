@@ -546,3 +546,33 @@ branches to ~190 with neither; the same picture on the PC.
   symptom (user workarounds: Game Turbo, no battery restrictions).
 - **Still open:** in the fast state the title screen's scene pass is 25.7 ms of GPU at full clock (sysmem rendering,
   `tiled=false`, 45 bins): the work itself, ~20x what the fill rate allows. Next: where in the pass it goes.
+
+## 2026-11-27 — Where the Adreno 610's 26 ms go: the GPU's own counters
+
+`USF_GPU_CLOCK=1` with `USF_GPU_COUNTERS="<group>:<countable>,..."` (gpu_boost.c; KGSL group ids UCHE 8, TP 9, SP 10,
+RB 11, VBIF 13, CCU 24, LRZ 25, HLSQ 4, VPC 5; countables from Mesa's a6xx_perfcntrs.xml): every 2 s each counter as
+a share of the GPU's cycles. The counters are read by the pinger's own command buffer (CP_REG_TO_MEM); reading them
+with KGSL_PERFCOUNTER_READ is refused (EPERM). The RB group holds 8 counters at a time (more read 0).
+Redmi 10C, title screen, 35.8 fps, Turnip, sysmem rendering:
+
+| what | value |
+|---|---|
+| GPU clock | 1115 MHz (its maximum), CP busy 100% |
+| RB busy / Z, C processing working | 99.8% / 99.8% |
+| RB blender working | 3.3% (blending is 8-bit fixed point, no FP16/FP32) |
+| pixels into the RB (RB_3D_PIXELS) | 273 M/s = 7.7 M a frame = 11.6 layers per screen pixel |
+| SP busy / ALU working | 99.2% / 25.7% |
+| SP stalled on the RB | 146% (several waves at once) |
+| HLSQ stalled on the fragment stage | 77% |
+| TP (textures) busy / stalled on UCHE / L1 misses | 92.6% / 0.7% / 25% of requests |
+| memory traffic (GBIF read / write) | ~0.8 / ~0.6 GB/s |
+| CCU stalls | ~0 |
+
+Reading: the pixels themselves (7.7 M blended, textured fragments a frame) at ~0.27 a clock; not the clock, not
+memory bandwidth, not texture caches, not blending precision.
+Tried, all ~35.5-36 fps (no change): Turnip `TU_DEBUG=noubwc`, `nolrz`, `nomultipos`, `gmem` (worse: 25 fps;
+with `USF_NO_DEPTH=1`: 36, 21 bins), Qualcomm's driver (35), `USF_ALPHAKILL=1` (alpha test on SRCALPHA blends so that
+alpha-0 pixels never reach the RB: same pixel count, the game draws almost none), the runtime's own renderer
+(`USF_DXVK=0`: 10-15 fps with Qualcomm's driver).
+Note: one Turnip trace came out with a time scale ~0.64x (16.3 "ms" scene at 35 fps): compare fps, not one trace's
+absolute times.
