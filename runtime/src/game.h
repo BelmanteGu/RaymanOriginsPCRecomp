@@ -17,6 +17,13 @@
  * from the Xbox 360 port, where the same pair is read by the engine's fit function). Wider screens: both changed. */
 #define GAME_ASPECT_PAIR 0x00A2C1B4u
 
+/* The screen rectangle's fit (the function at 0x83EFF0: the picture letterboxed or pillarboxed to 16:9, then copied
+ * centred with two StretchRects and black bars cleared): two doubles in .rdata, 9/16 at 0xA2C230 and 16/9 (in float
+ * precision) at 0xA2C238. Kept in step with the pair, but they alone do not remove the bars: the fit is integer code
+ * (x * 9 >> 4 at 95 places), replaced in the lifter (tools/lift/lift.py FIT_SITES, docs/ANDROID-PERFORMANCE.md). */
+#define GAME_FIT_INV 0x00A2C230u
+#define GAME_FIT_ASPECT 0x00A2C238u
+
 /* UbiArt's frame rates (.data): the app loop's fps and 1/fps, then the game logic's fps and 1/fps (the logic step,
  * read in 65 places), set by the engine's SetFrameRate (0x796E60) as 60 and 1/60. 120 fps = all four at 120. */
 #define GAME_RATE_VARS 0x00A8A9D8u

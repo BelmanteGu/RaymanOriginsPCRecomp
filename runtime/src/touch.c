@@ -437,13 +437,94 @@ static void draw_menu(int w, int h) {
     }
 }
 
-/* The layer's picture for a w x h screen; NULL if there is nothing to draw. *changed: it differs from last time. */
+/* One drawing to place: where (the float centre and radius, for the DXVK quads) and, for the layer, its square of
+ * n x n pixels at (x0, y0). */
+typedef struct { int art, bright, x0, y0, n, a8; float cx, cy, r, a; } Item;
+#define MAXI 24
+static void add(Item *it, int *n, int art, float cx, float cy, float r, float a, int bright) {
+    if (*n >= MAXI) return;
+    float half = r / 0.84f;
+    int sz = (int)(2 * half + 0.5f);
+    if (sz < 1) sz = 1;
+    it[(*n)++] = (Item){art, bright, (int)lroundf(cx - (float)sz * 0.5f), (int)lroundf(cy - (float)sz * 0.5f), sz,
+                        (int)(a * 255 + 0.5f), cx, cy, r, a};
+}
+/* A drawing scaled to n x n, with its opacity and brightness applied, premultiplied: made once, then only copied.
+ * (Rasterising it again, bilinear in floats, at every finger move cost the layer thread ~10 ms a frame.) */
+typedef struct { int art, n, a8, bright; uint8_t *px; } Scaled;
+static Scaled cache[16];
+static int cache_next;
+static const uint8_t *scaled(int art, int n, int a8, int bright) {
+    for (int i = 0; i < 16; i++)
+        if (cache[i].px && cache[i].art == art && cache[i].n == n && cache[i].a8 == a8 && cache[i].bright == bright) return cache[i].px;
+    Scaled *c = &cache[cache_next];
+    cache_next = (cache_next + 1) % 16;
+    free(c->px);
+    c->px = calloc((size_t)n * n, 4);
+    if (!c->px) return NULL;
+    c->art = art; c->n = n; c->a8 = a8; c->bright = bright;
+    const uint8_t *src = touch_art + (size_t)art * ART_SIZE * ART_SIZE * 4;
+    float k = (float)ART_SIZE / (float)n, a = (float)a8 / 255.0f, lift = bright ? 1.35f : 1.0f;
+    for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++) {
+            float u = ((float)x + 0.5f) * k - 0.5f, v = ((float)y + 0.5f) * k - 0.5f;
+            if (u < 0 || v < 0 || u > ART_SIZE - 1 || v > ART_SIZE - 1) continue;
+            int iu = (int)u, iv = (int)v, ju = iu + 1 < ART_SIZE ? iu + 1 : iu, jv = iv + 1 < ART_SIZE ? iv + 1 : iv;
+            float fu = u - (float)iu, fv = v - (float)iv, cc[4];
+            for (int ch = 0; ch < 4; ch++)
+                cc[ch] = (src[4 * (iv * ART_SIZE + iu) + ch] * (1 - fu) + src[4 * (iv * ART_SIZE + ju) + ch] * fu) * (1 - fv) +
+                         (src[4 * (jv * ART_SIZE + iu) + ch] * (1 - fu) + src[4 * (jv * ART_SIZE + ju) + ch] * fu) * fv;
+            if (cc[3] < 1) continue;
+            uint8_t *o = c->px + 4 * ((size_t)y * n + x);
+            float sa = cc[3] / 255.0f * a;
+            for (int ch = 0; ch < 3; ch++) o[ch] = (uint8_t)fminf(fminf(cc[ch] * a * lift, 255.0f * sa), 255.0f);
+            o[3] = (uint8_t)(255.0f * sa + 0.5f);
+        }
+    return c->px;
+}
+/* one drawing over the picture, only inside [l, r) x [t, b) */
+static void blit(const Item *it, int l, int t, int r, int b) {
+    int x0 = it->x0 > l ? it->x0 : l, x1 = it->x0 + it->n < r ? it->x0 + it->n : r;
+    int y0 = it->y0 > t ? it->y0 : t, y1 = it->y0 + it->n < b ? it->y0 + it->n : b;
+    if (x0 >= x1 || y0 >= y1) return;
+    const uint8_t *s = scaled(it->art, it->n, it->a8, it->bright);
+    if (!s) return;
+    pix_has = 1;
+    for (int y = y0; y < y1; y++) {
+        const uint8_t *q = s + 4 * ((size_t)(y - it->y0) * it->n + (x0 - it->x0));
+        uint8_t *p = pix + 4 * ((size_t)y * pw + x0);
+        for (int x = x0; x < x1; x++, q += 4, p += 4) {
+            if (!q[3]) continue;
+            unsigned inv = 255u - q[3];
+            for (int ch = 0; ch < 3; ch++) {
+                unsigned o = q[ch] + (p[ch] * inv + 127u) / 255u;
+                p[ch] = (uint8_t)(o > 255 ? 255 : o);
+            }
+            p[3] = (uint8_t)(q[3] + (p[3] * inv + 127u) / 255u);
+        }
+    }
+}
+static Item prev[MAXI];
+static int nprev = -1, prev_full;
+static int dr_l, dr_t, dr_r, dr_b;                       /* what the last touch_picture changed */
+/* the rectangle the last touch_picture that said *changed redrew (the layer posts only that) */
+void touch_picture_rect(int *l, int *t, int *r, int *b);
+void touch_picture_rect(int *l, int *t, int *r, int *b) { *l = dr_l; *t = dr_t; *r = dr_r; *b = dr_b; }
+
+/* the next touch_picture draws again (a new layer surface: its buffers start empty) */
+void touch_redraw(void);
+void touch_redraw(void) { pthread_mutex_lock(&lk); dirty = 1; nprev = -1; pthread_mutex_unlock(&lk); }
+/* The layer's picture for a w x h screen; NULL if there is nothing to draw. *changed: it differs from last time.
+ * The touch state is copied under the lock and the drawing done after it: the game thread takes the same lock for
+ * every finger move (touch_event, from its message pump), so drawing under it stalled the game while the stick moved.
+ * With the layer (touch_gpu_sprites 0) only what changed is cleared and drawn again: moving the stick redraws the
+ * stick's square, not the screen. */
 const uint8_t *touch_picture(int w, int h, int *changed);
 const uint8_t *touch_picture(int w, int h, int *changed) {
     *changed = 0;
     if (!active) return NULL;
     pthread_mutex_lock(&lk);
-    if (w != pw || h != ph) { free(pix); pix = calloc((size_t)w * h, 4); pw = w; ph = h; dirty = 1; }
+    if (w != pw || h != ph) { free(pix); pix = calloc((size_t)w * h, 4); pw = w; ph = h; dirty = 1; nprev = -1; }
     static uint32_t frames, t_last;
     uint32_t now = SDL_GetTicks();
     frames++;
@@ -454,49 +535,90 @@ const uint8_t *touch_picture(int w, int h, int *changed) {
         frames = 0; t_last = now;
     }
     if (!dirty) { pthread_mutex_unlock(&lk); return pix; }
-    if (pix_has) memset(pix, 0, (size_t)w * h * 4);
-    pix_has = 0;
-    nquads = 0;
+    dirty = 0;
+    const int s_menu = menu_open, s_edit = editing, s_run = run_on, s_hidden = pad_hidden;
+    const uint16_t s_held = held;
+    Finger s_f[10];
+    memcpy(s_f, fingers, sizeof s_f);
+    char s_fps[sizeof fps_text];
+    memcpy(s_fps, fps_text, sizeof s_fps);
+    pthread_mutex_unlock(&lk);
+    if (!pix) return NULL;
+
+    Item it[MAXI];
+    int n = 0;
     float alpha = set.opacity == 0 ? 0.5f : set.opacity == 2 ? 1.0f : 0.75f, s = scale();
-    if (menu_open) draw_menu(w, h);
-    if (editing) {                                                        /* moving the buttons */
+    if (s_edit && set.stick) add(it, &n, ART_STICK_BASE, bx[NB] * w, by[NB] * h, STICK_R * s * h, 1.0f, 0);
+    for (int i = 0; i < NB; i++) {
+        Button *b = &buttons[i];
+        if ((!set.on || s_hidden) && !always_shown(b) && !s_edit) continue;
+        if (s_menu && b->bit != B_MENU) continue;
+        float cx = bx[i] * (float)w, cy = by[i] * (float)h, r = b->r * (always_shown(b) ? 1.0f : s) * (float)h;
+        int down = (s_held & b->bit) || (b->bit == B_RUN && s_run) || (b->bit == B_MENU && s_menu);
+        add(it, &n, b->art, cx, cy, down ? r * 0.94f : r, always_shown(b) ? fmaxf(alpha, 0.75f) : alpha, down);
+    }
+    int stick_held = 0;
+    for (int k = 0; k < 10; k++) if (s_f[k].id && s_f[k].role == 1) stick_held = 1;
+    if (set.on && set.stick && !s_hidden && !s_menu && !s_edit && !stick_held) {   /* the fixed stick, at rest */
+        add(it, &n, ART_STICK_BASE, bx[NB] * w, by[NB] * h, STICK_R * s * h, alpha, 0);
+        add(it, &n, ART_STICK_KNOB, bx[NB] * w, by[NB] * h, STICK_R * s * h * 0.42f, alpha, 0);
+    }
+    for (int k = 0; k < 10 && set.on && !s_menu && !s_edit; k++)        /* the stick under the thumb */
+        if (s_f[k].id && s_f[k].role == 1) {
+            float r = 0.13f * s * (float)h;
+            add(it, &n, ART_STICK_BASE, s_f[k].x0 * (float)w, s_f[k].y0 * (float)h, r, alpha, 0);
+            add(it, &n, ART_STICK_KNOB, s_f[k].x * (float)w, s_f[k].y * (float)h, r * 0.42f, alpha, 0);
+        }
+    int dxb_enabled(void);
+    int fps_on = set.showfps && !dxb_enabled();            /* (with DXVK its own counter shows: dxvk_bridge.c) */
+    int full = s_menu || s_edit || fps_on || prev_full || nprev != n || touch_gpu_sprites;
+
+    int l = 0, t = 0, r = w, b = h;
+    if (!full) {                                              /* only the drawings that moved or changed */
+        l = w; t = h; r = 0; b = 0;
+        for (int i = 0; i < n; i++) {
+            const Item *x = &it[i], *y = &prev[i];
+            if (x->art == y->art && x->x0 == y->x0 && x->y0 == y->y0 && x->n == y->n && x->a8 == y->a8 && x->bright == y->bright) continue;
+            const Item *both[2] = {x, y};
+            for (int j = 0; j < 2; j++) {
+                const Item *z = both[j];
+                if (z->x0 < l) l = z->x0;
+                if (z->y0 < t) t = z->y0;
+                if (z->x0 + z->n > r) r = z->x0 + z->n;
+                if (z->y0 + z->n > b) b = z->y0 + z->n;
+            }
+        }
+        if (l < 0) l = 0;
+        if (t < 0) t = 0;
+        if (r > w) r = w;
+        if (b > h) b = h;
+    }
+    memcpy(prev, it, sizeof(Item) * (size_t)n);
+    nprev = n;
+    prev_full = s_menu || s_edit || fps_on;
+    if (l >= r || t >= b) return pix;                         /* nothing that shows changed */
+
+    if (full) { memset(pix, 0, (size_t)w * h * 4); pix_has = 0; }
+    else for (int y = t; y < b; y++) memset(pix + 4 * ((size_t)y * w + l), 0, (size_t)(r - l) * 4);
+    nquads = 0;
+    if (s_menu) draw_menu(w, h);
+    if (s_edit) {                                                         /* moving the buttons */
         rect(0, 0, (float)w, (float)h, 0x000000u, 0.35f);
         text(word(T_DRAG), w * 0.5f, h * 0.08f, fmaxf(2.0f, (float)h / 170.0f), 0xF8F8F8u, 1.0f);
         const Rect *rs[2] = {&edit_reset, &edit_done};
         for (int i = 0; i < 2; i++) {
-            const Rect *r = rs[i];
-            rect(r->x0 * w - h / 160.0f, r->y0 * h - h / 160.0f, r->x1 * w + h / 160.0f, r->y1 * h + h / 160.0f, 0x3A0000u, 1.0f);
-            rect(r->x0 * w, r->y0 * h, r->x1 * w, r->y1 * h, 0x780000u, 1.0f);
-            text(word(i ? T_DONE : T_RESET), (r->x0 + r->x1) / 2 * w, (r->y0 + r->y1) / 2 * h, fmaxf(2.0f, (float)h / 200.0f), i ? 0xF8F8F8u : 0xF89018u, 1.0f);
-        }
-        if (set.stick) sprite(ART_STICK_BASE, bx[NB] * w, by[NB] * h, STICK_R * s * h, 1.0f, 0);
-    }
-    for (int i = 0; i < NB; i++) {
-        Button *b = &buttons[i];
-        if ((!set.on || pad_hidden) && !always_shown(b) && !editing) continue;
-        if (menu_open && b->bit != B_MENU) continue;
-        float cx = bx[i] * (float)w, cy = by[i] * (float)h, r = b->r * (always_shown(b) ? 1.0f : s) * (float)h;
-        int down = (held & b->bit) || (b->bit == B_RUN && run_on) || (b->bit == B_MENU && menu_open);
-        sprite(b->art, cx, cy, down ? r * 0.94f : r, always_shown(b) ? fmaxf(alpha, 0.75f) : alpha, down);
-    }
-    if (set.on && set.stick && !pad_hidden && !menu_open && !editing) {      /* the fixed stick, at rest */
-        int held_now = 0;
-        for (int k = 0; k < 10; k++) if (fingers[k].id && fingers[k].role == 1) held_now = 1;
-        if (!held_now) {
-            sprite(ART_STICK_BASE, bx[NB] * w, by[NB] * h, STICK_R * s * h, alpha, 0);
-            sprite(ART_STICK_KNOB, bx[NB] * w, by[NB] * h, STICK_R * s * h * 0.42f, alpha, 0);
+            const Rect *q = rs[i];
+            rect(q->x0 * w - h / 160.0f, q->y0 * h - h / 160.0f, q->x1 * w + h / 160.0f, q->y1 * h + h / 160.0f, 0x3A0000u, 1.0f);
+            rect(q->x0 * w, q->y0 * h, q->x1 * w, q->y1 * h, 0x780000u, 1.0f);
+            text(word(i ? T_DONE : T_RESET), (q->x0 + q->x1) / 2 * w, (q->y0 + q->y1) / 2 * h, fmaxf(2.0f, (float)h / 200.0f), i ? 0xF8F8F8u : 0xF89018u, 1.0f);
         }
     }
-    int dxb_enabled(void);
-    if (set.showfps && !dxb_enabled()) text(fps_text,     /* (with DXVK its own counter shows: dxvk_bridge.c) */ w * 0.035f, h * 0.955f, fmaxf(2.0f, (float)h / 280.0f), 0xF8F8F8u, 0.9f);
-    for (int k = 0; k < 10 && set.on && !menu_open && !editing; k++)        /* the stick under the thumb */
-        if (fingers[k].id && fingers[k].role == 1) {
-            float r = 0.13f * s * (float)h;
-            sprite(ART_STICK_BASE, fingers[k].x0 * (float)w, fingers[k].y0 * (float)h, r, alpha, 0);
-            sprite(ART_STICK_KNOB, fingers[k].x * (float)w, fingers[k].y * (float)h, r * 0.42f, alpha, 0);
-        }
-    dirty = 0;
+    for (int i = 0; i < n; i++) {
+        if (touch_gpu_sprites) sprite(it[i].art, it[i].cx, it[i].cy, it[i].r, it[i].a, it[i].bright);
+        else blit(&it[i], l, t, r, b);
+    }
+    if (fps_on) text(s_fps, w * 0.035f, h * 0.955f, fmaxf(2.0f, (float)h / 280.0f), 0xF8F8F8u, 0.9f);
+    dr_l = l; dr_t = t; dr_r = r; dr_b = b;
     *changed = 1;
-    pthread_mutex_unlock(&lk);
     return pix;
 }

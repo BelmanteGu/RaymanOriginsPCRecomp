@@ -4,7 +4,7 @@
 # usage: sh tools/android/build_ffmpeg.sh   (the FFmpeg 7.1 source in private/android/ffmpeg/ffmpeg-7.1, from ffmpeg.org)
 set -e
 NDK=${NDK:-$HOME/Android/Sdk/ndk/28.2.13676358}
-TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+TC=$(ls -d $NDK/toolchains/llvm/prebuilt/*/bin | head -1)   # linux-x86_64 or darwin-x86_64
 SRC=private/android/ffmpeg/ffmpeg-7.1
 OUT=$PWD/private/android/ffmpeg/out
 cd $SRC

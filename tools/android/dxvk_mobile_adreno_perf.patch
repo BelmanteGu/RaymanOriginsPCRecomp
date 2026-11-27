@@ -1,0 +1,568 @@
+Adreno speed-ups for dxvk-mobile (after dxvk_mobile_nocentroid.patch): a framebuffer cache (DXVK 1.9 made a VkFramebuffer,
+a kernel allocation on the Qualcomm driver, at every render-target change; DXVK_FB_CACHE=0 turns it off), the window's
+buffers at the game's size so the display scales them (DXVK_HWC_SIZE, set by the port when FSR is off), fragment-only
+barriers between passes (DXVK_FRAG_BARRIERS), no blending on formats that cannot blend, and analysis switches
+(DXVK_FRAMELOG, DXVK_PASSTIME, DXVK_PASSSEQ, DXVK_SKIP_STRETCH). Apply with patch -p1 inside private/deps/dxvk-mobile.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -133,4 +133,4 @@
+     DXVK_WSI_SDL2 DXVK_PLATFORM_LINUX _FILE_OFFSET_BITS=64)
+ target_compile_options(dxvk_d3d9 PRIVATE -O2 "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cstdint>" "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cstring>"
+     -Wno-deprecated-declarations -Wno-everything -fvisibility=default)
+-target_link_libraries(dxvk_d3d9 PRIVATE ${SDL3_LIBRARY} $<$<BOOL:${ANDROID}>:vulkan> $<$<BOOL:${ANDROID}>:log> dl $<$<NOT:$<BOOL:${ANDROID}>>:pthread>)
++target_link_libraries(dxvk_d3d9 PRIVATE ${SDL3_LIBRARY} $<$<BOOL:${ANDROID}>:vulkan> $<$<BOOL:${ANDROID}>:log> $<$<BOOL:${ANDROID}>:android> dl $<$<NOT:$<BOOL:${ANDROID}>>:pthread>)
+--- a/src/d3d9/d3d9_common_texture.cpp
++++ b/src/d3d9/d3d9_common_texture.cpp
+@@ -222,7 +222,9 @@
+                               | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                               | VK_IMAGE_USAGE_SAMPLED_BIT;
+     imageInfo.stages          = VK_PIPELINE_STAGE_TRANSFER_BIT
+-                              | m_device->GetEnabledShaderStages();
++                              | (dxvkFragmentOnlyBarriers()       // Port: fragment-only barriers (dxvk_context.h)
++                                  ? VkPipelineStageFlags(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
++                                  : m_device->GetEnabledShaderStages());
+     imageInfo.access          = VK_ACCESS_TRANSFER_READ_BIT
+                               | VK_ACCESS_TRANSFER_WRITE_BIT
+                               | VK_ACCESS_SHADER_READ_BIT;
+\ No newline at end of file
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -25,6 +25,34 @@
+ 
+ #include <algorithm>
+ #include <cfloat>
++#include <cstdlib>
++
++// Port (Rayman Origins PC, analysis): DXVK_FRAMELOG=<frame number> writes that one frame's render target changes,
++// copies, clears and draws in order (the draws between two events as one line, with the first draw's pixel shader: an
++// FNV-1a of its bytecode, and whether stage 0 samples a render target). Off without the variable.
++namespace dxvk { namespace framelog {
++  static int target() { static int t = [] { const char* e = std::getenv("DXVK_FRAMELOG"); return e ? atoi(e) : -1; }(); return t; }
++  static uint32_t s_frame, s_draws, s_prims, s_ps; static bool s_rtTex;
++  static bool on() { return target() >= 0 && int(s_frame) == target(); }
++  static uint32_t hashOf(D3D9PixelShader* ps) {
++    if (!ps) return 0;
++    uint32_t h = 2166136261u;
++    for (uint8_t c : ps->GetCommonShader()->GetBytecode()) { h ^= c; h *= 16777619u; }
++    return h;
++  }
++  static void flush() {
++    if (on() && s_draws) Logger::info(str::format("framelog:   ", s_draws, " draws, ", s_prims, " prims (first: ps ", std::hex, s_ps, std::dec,
++      s_rtTex ? ", stage 0 = a render target" : "", ")"));
++    s_draws = s_prims = 0;
++  }
++  static std::string surf(IDirect3DSurface9* s) {
++    if (!s) return "null";
++    D3DSURFACE_DESC d; s->GetDesc(&d);
++    return str::format(s, " ", d.Width, "x", d.Height, " fmt ", uint32_t(d.Format),
++      (d.Usage & D3DUSAGE_RENDERTARGET) ? " rt" : "", (d.Usage & D3DUSAGE_DEPTHSTENCIL) ? " ds" : "");
++  }
++  static void event(const std::string& what) { if (on()) { flush(); Logger::info(str::format("framelog: ", what)); } }
++} }
+ #ifdef MSC_VER
+ #pragma fenv_access (on)
+ #endif
+@@ -909,6 +937,14 @@
+ 
+     D3D9Surface* dst = static_cast<D3D9Surface*>(pDestSurface);
+     D3D9Surface* src = static_cast<D3D9Surface*>(pSourceSurface);
++    if (framelog::on()) {
++      auto rc = [] (const RECT* r) { return r ? str::format("[", r->left, ",", r->top, " - ", r->right, ",", r->bottom, "]") : std::string("[whole]"); };
++      framelog::event(str::format("StretchRect ", framelog::surf(pSourceSurface), " ", rc(pSourceRect), " -> ", framelog::surf(pDestSurface), " ", rc(pDestRect), " filter ", uint32_t(Filter)));
++    }
++    { // (analysis) DXVK_SKIP_STRETCH=1: StretchRect does nothing (what the game's letterbox copies cost)
++      static const bool skip = [] { const char* e = std::getenv("DXVK_SKIP_STRETCH"); return e && *e == '1'; }();
++      if (skip) return D3D_OK;
++    }
+ 
+     if (unlikely(src == nullptr || dst == nullptr))
+       return D3DERR_INVALIDCALL;
+@@ -1112,6 +1148,7 @@
+     const RECT*              pRect,
+           D3DCOLOR           Color) {
+     D3D9DeviceLock lock = LockDevice();
++    framelog::event(str::format("ColorFill ", framelog::surf(pSurface)));
+ 
+     D3D9Surface* dst = static_cast<D3D9Surface*>(pSurface);
+ 
+@@ -1213,6 +1250,7 @@
+     D3D9CommonTexture* texInfo = rt != nullptr
+       ? rt->GetCommonTexture()
+       : nullptr;
++    framelog::event(str::format("SetRenderTarget(", RenderTargetIndex, ") ", framelog::surf(pRenderTarget)));
+ 
+     if (unlikely(rt != nullptr && !(texInfo->Desc()->Usage & D3DUSAGE_RENDERTARGET)))
+       return D3DERR_INVALIDCALL;
+@@ -1313,6 +1351,7 @@
+ 
+   HRESULT STDMETHODCALLTYPE D3D9DeviceEx::SetDepthStencilSurface(IDirect3DSurface9* pNewZStencil) {
+     D3D9DeviceLock lock = LockDevice();
++    framelog::event(str::format("SetDepthStencilSurface ", framelog::surf(pNewZStencil)));
+ 
+     D3D9Surface* ds = static_cast<D3D9Surface*>(pNewZStencil);
+ 
+@@ -1393,6 +1432,8 @@
+           D3DCOLOR Color,
+           float    Z,
+           DWORD    Stencil) {
++    framelog::event(str::format("Clear count ", Count, " flags ", Flags, " color ", std::hex, Color, std::dec, " viewport ",
++      m_state.viewport.X, ",", m_state.viewport.Y, " ", m_state.viewport.Width, "x", m_state.viewport.Height));
+     if (unlikely(!Count && pRects))
+       return D3D_OK;
+ 
+@@ -2367,6 +2408,14 @@
+           UINT             StartVertex,
+           UINT             PrimitiveCount) {
+     D3D9DeviceLock lock = LockDevice();
++    if (framelog::on()) {
++      if (!framelog::s_draws) {
++        framelog::s_ps = framelog::hashOf(m_state.pixelShader.ptr());
++        auto* t0 = m_state.textures[0];
++        framelog::s_rtTex = t0 && (GetCommonTexture(t0)->Desc()->Usage & D3DUSAGE_RENDERTARGET);
++      }
++      framelog::s_draws++; framelog::s_prims += PrimitiveCount;
++    }
+ 
+     if (unlikely(config::FullValidation && m_state.vertexDecl == nullptr))
+       return D3DERR_INVALIDCALL;
+@@ -2403,6 +2452,14 @@
+           UINT             StartIndex,
+           UINT             PrimitiveCount) {
+     D3D9DeviceLock lock = LockDevice();
++    if (framelog::on()) {
++      if (!framelog::s_draws) {
++        framelog::s_ps = framelog::hashOf(m_state.pixelShader.ptr());
++        auto* t0 = m_state.textures[0];
++        framelog::s_rtTex = t0 && (GetCommonTexture(t0)->Desc()->Usage & D3DUSAGE_RENDERTARGET);
++      }
++      framelog::s_draws++; framelog::s_prims += PrimitiveCount;
++    }
+ 
+     if (unlikely(config::FullValidation && m_state.vertexDecl == nullptr))
+       return D3DERR_INVALIDCALL;
+@@ -2439,6 +2496,14 @@
+     const void*            pVertexStreamZeroData,
+           UINT             VertexStreamZeroStride) {
+     D3D9DeviceLock lock = LockDevice();
++    if (framelog::on()) {
++      if (!framelog::s_draws) {
++        framelog::s_ps = framelog::hashOf(m_state.pixelShader.ptr());
++        auto* t0 = m_state.textures[0];
++        framelog::s_rtTex = t0 && (GetCommonTexture(t0)->Desc()->Usage & D3DUSAGE_RENDERTARGET);
++      }
++      framelog::s_draws++; framelog::s_prims += PrimitiveCount;
++    }
+ 
+     if (unlikely(config::FullValidation && m_state.vertexDecl == nullptr))
+       return D3DERR_INVALIDCALL;
+@@ -2492,6 +2557,14 @@
+     const void*            pVertexStreamZeroData,
+           UINT             VertexStreamZeroStride) {
+     D3D9DeviceLock lock = LockDevice();
++    if (framelog::on()) {
++      if (!framelog::s_draws) {
++        framelog::s_ps = framelog::hashOf(m_state.pixelShader.ptr());
++        auto* t0 = m_state.textures[0];
++        framelog::s_rtTex = t0 && (GetCommonTexture(t0)->Desc()->Usage & D3DUSAGE_RENDERTARGET);
++      }
++      framelog::s_draws++; framelog::s_prims += PrimitiveCount;
++    }
+ 
+     if (unlikely(config::FullValidation && m_state.vertexDecl == nullptr))
+         return D3DERR_INVALIDCALL;
+@@ -2803,6 +2876,9 @@
+     auto* oldShader = GetCommonShader(m_state.vertexShader);
+     auto* newShader = GetCommonShader(shader);
+ 
++    if (newShader && newShader->GetShaderMask().samplerMask)  // Port: fragment-only barriers end (dxvk_context.h)
++      dxvkVertexStageReadsImages();
++
+     bool oldCopies = oldShader && oldShader->GetMeta().needsConstantCopies;
+     bool newCopies = newShader && newShader->GetMeta().needsConstantCopies;
+ 
+@@ -3420,6 +3496,8 @@
+           HWND hDestWindowOverride,
+     const RGNDATA* pDirtyRegion,
+           DWORD dwFlags) {
++    framelog::event("Present");
++    framelog::s_frame++;
+     return m_implicitSwapchain->Present(
+       pSourceRect,
+       pDestRect,
+--- a/src/dxvk/dxvk_cmdlist.h
++++ b/src/dxvk/dxvk_cmdlist.h
+@@ -265,6 +265,8 @@
+       const VkRenderPassBeginInfo*  pRenderPassBegin,
+             VkSubpassContents       contents) {
+       passlog::begin(pRenderPassBegin->renderArea.extent.width, pRenderPassBegin->renderArea.extent.height);
++      { VkQueryPool pool; uint32_t q;                    // DXVK_PASSTIME: the pass's first timestamp
++        if (passlog::timeBegin(m_vkd.ptr(), &pool, &q)) { cmdResetQueryPool(pool, q, 2); cmdWriteTimestamp(VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, pool, q); } }
+       m_vkd->vkCmdBeginRenderPass(m_execBuffer,
+         pRenderPassBegin, contents);
+     }
+@@ -586,6 +588,8 @@
+     
+     void cmdEndRenderPass() {
+       m_vkd->vkCmdEndRenderPass(m_execBuffer);
++      { VkQueryPool pool; uint32_t q;                    // DXVK_PASSTIME: the pass's second timestamp
++        if (passlog::timeEnd(&pool, &q)) cmdWriteTimestamp(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pool, q); }
+       passlog::end();
+     }
+     
+--- a/src/dxvk/dxvk_context.cpp
++++ b/src/dxvk/dxvk_context.cpp
+@@ -4,6 +4,21 @@
+ 
+ #include "dxvk_device.h"
+ #include "dxvk_context.h"
++
++#include <atomic>
++#include <cstdlib>
++
++namespace dxvk {
++  static std::atomic<bool> g_vsImages { false };
++  bool dxvkFragmentOnlyBarriers() {
++    static const bool on = [] { const char* e = std::getenv("DXVK_FRAG_BARRIERS"); return e && *e == '1'; }();
++    return on && !g_vsImages.load(std::memory_order_relaxed);
++  }
++  void dxvkVertexStageReadsImages() {
++    if (dxvkFragmentOnlyBarriers() && !g_vsImages.exchange(true))
++      Logger::warn("DXVK: a vertex shader samples images: barriers wait for the vertex stage again from here on");
++  }
++}
+ #include "dxvk_main.h"
+ 
+ namespace dxvk {
+@@ -4080,7 +4095,11 @@
+ 
+     renderPassOps.barrier.srcStages = VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT;
+     renderPassOps.barrier.srcAccess = access;
+-    renderPassOps.barrier.dstStages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
++    renderPassOps.barrier.dstStages = dxvkFragmentOnlyBarriers()      // Port: see dxvkFragmentOnlyBarriers
++      ? VkPipelineStageFlags(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
++        | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
++        | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
++      : VkPipelineStageFlags(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+     renderPassOps.barrier.dstAccess = access;
+   }
+   
+--- a/src/dxvk/dxvk_context.h
++++ b/src/dxvk/dxvk_context.h
+@@ -1355,4 +1355,12 @@
+ 
+   };
+   
++  /* Port (Rayman Origins PC, Android): DXVK_FRAG_BARRIERS=1 makes
++   * the barriers after a render pass and those of D3D9 textures wait for the fragment stage only, not for every stage
++   * from the vertex input on. On a tiling GPU a barrier that reaches the vertex stage holds the next pass's binning
++   * until the previous pass is done. Safe while no vertex shader samples an image: the first one that does turns it off
++   * for good (dxvkVertexStageReadsImages, logged). */
++  bool dxvkFragmentOnlyBarriers();
++  void dxvkVertexStageReadsImages();
++
+ }
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -1,4 +1,6 @@
+ #include "dxvk_device.h"
++#include <cstdlib>
++#include "dxvk_passlog.h"
+ #include "dxvk_instance.h"
+ 
+ namespace dxvk {
+@@ -7,6 +9,14 @@
+   bool g_dxvkUbyte4AsUint = false;
+ 
+   
++  // Port (blend off on formats without blend): whether a colour format blends on
++  // this GPU; a pipeline that blends into one that does not is invalid (some mobile drivers draw garbage or hang)
++  static DxvkAdapter* g_blendAdapter;
++  bool dxvkFormatBlends(VkFormat f) {
++    if (!g_blendAdapter || f == VK_FORMAT_UNDEFINED) return true;
++    return (g_blendAdapter->formatProperties(f).optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
++  }
++
+   DxvkDevice::DxvkDevice(
+     const Rc<DxvkInstance>&         instance,
+     const Rc<DxvkAdapter>&          adapter,
+@@ -24,6 +34,8 @@
+     m_objects           (this),
+     m_submissionQueue   (this) {
+     g_dxvkDepthClamp = features.core.features.depthClamp;
++    g_blendAdapter = adapter.ptr();
++    passlog::period() = adapter->deviceProperties().limits.timestampPeriod;   // DXVK_PASSTIME: ns per tick
+     {
+       VkFormatProperties fp = adapter->formatProperties(VK_FORMAT_R8G8B8A8_USCALED);
+       const char* force = std::getenv("LB_NOSCALED");
+@@ -122,8 +134,47 @@
+   }
+   
+   
++  // Port (Rayman Origins PC, Android): DXVK 1.9 made a new VkFramebuffer at every render target change. Qualcomm's
++  // Adreno driver allocates GPU memory in the kernel for each one (vkCreateFramebuffer -> gsl_memory_alloc_pure ->
++  // IOCTL_KGSL_SHAREDMEM_ALLOC): measured in play on a Galaxy Tab S6 Lite, 13% of the game's CPU time, most of its
++  // kernel time. The recent framebuffers are kept (the same attachments and layouts: the same one again) and the least
++  // recently used goes when the cache is full; a framebuffer in use stays alive through its command lists anyway.
++  // DXVK_FB_CACHE=0 turns it off.
++  namespace {
++    struct FbCacheEntry { Rc<DxvkFramebuffer> fb; uint64_t used = 0; };
++    constexpr uint32_t FbCacheSize = 32;
++  }
++
+   Rc<DxvkFramebuffer> DxvkDevice::createFramebuffer(
+     const DxvkRenderTargets& renderTargets) {
++    static const bool cacheOn = [] { const char* e = std::getenv("DXVK_FB_CACHE"); return !(e && *e == '0'); }();
++    static dxvk::mutex             s_lock;
++    static FbCacheEntry            s_cache[FbCacheSize];
++    static const DxvkDevice*       s_owner = nullptr;
++    static uint64_t                s_clock = 0, s_hits = 0, s_misses = 0;
++
++    std::unique_lock<dxvk::mutex> lock(s_lock, std::defer_lock);
++    if (cacheOn) {
++      lock.lock();
++      if (s_owner != this) {                            // another device: nothing of the last one is reused
++        for (auto& e : s_cache) e = FbCacheEntry();
++        s_owner = this;
++      }
++      for (auto& e : s_cache) {                         // not asked for in the last 512 changes: let it (and the
++        if (e.fb != nullptr && e.used + 512 < s_clock)    // render targets it holds) go, e.g. after a level change
++          e = FbCacheEntry();
++      }
++      for (auto& e : s_cache) {
++        if (e.fb != nullptr && e.fb->hasTargets(renderTargets)) {
++          e.used = ++s_clock;
++          if ((++s_hits & 0xFFFF) == 0)
++            Logger::info(str::format("DXVK: framebuffer cache: ", s_hits, " reused, ", s_misses, " made"));
++          return e.fb;
++        }
++      }
++      s_misses++;
++    }
++
+     const DxvkFramebufferSize defaultSize = {
+       m_properties.core.properties.limits.maxFramebufferWidth,
+       m_properties.core.properties.limits.maxFramebufferHeight,
+@@ -132,8 +183,19 @@
+     auto renderPassFormat = DxvkFramebuffer::getRenderPassFormat(renderTargets);
+     auto renderPassObject = m_objects.renderPassPool().getRenderPass(renderPassFormat);
+     
+-    return new DxvkFramebuffer(m_vkd,
++    Rc<DxvkFramebuffer> fb = new DxvkFramebuffer(m_vkd,
+       renderPassObject, renderTargets, defaultSize);
++
++    if (cacheOn) {
++      FbCacheEntry* slot = &s_cache[0];
++      for (auto& e : s_cache) {
++        if (e.fb == nullptr) { slot = &e; break; }
++        if (e.used < slot->used) slot = &e;
++      }
++      slot->fb = fb;
++      slot->used = ++s_clock;
++    }
++    return fb;
+   }
+   
+   
+--- a/src/dxvk/dxvk_graphics.cpp
++++ b/src/dxvk/dxvk_graphics.cpp
+@@ -120,6 +120,8 @@
+   }
+   
+   
++  bool dxvkFormatBlends(VkFormat f);   // dxvk_device.cpp
++
+   VkPipeline DxvkGraphicsPipeline::createPipeline(
+     const DxvkGraphicsPipelineStateInfo& state,
+     const DxvkRenderPass*                renderPass) const {
+@@ -208,6 +210,12 @@
+       
+       if ((m_fsOut & (1 << i)) == 0)
+         omBlendAttachments[i].colorWriteMask = 0;
++
++      if (omBlendAttachments[i].blendEnable && !dxvkFormatBlends(passFormat.color[i].format)) {   // Port
++        static bool logged;
++        if (!logged) { logged = true; Logger::warn(str::format("DXVK: blending off for format ", passFormat.color[i].format, " (the GPU cannot blend into it)")); }
++        omBlendAttachments[i].blendEnable = VK_FALSE;
++      }
+     }
+ 
+     // Generate per-instance attribute divisors
+--- a/src/dxvk/dxvk_passlog.h
++++ b/src/dxvk/dxvk_passlog.h
+@@ -6,15 +6,17 @@
+ // with its count a second and its draws per pass. Recorded on the CS thread only (no lock).
+ 
+ #include <chrono>
++#include <thread>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+ 
+ #include "../util/log/log.h"
++#include "../vulkan/vulkan_loader.h"
+ 
+ namespace dxvk::passlog {
+ 
+-  struct Kind { uint32_t w, h, att, depth, colorLoad, depthLoad, depthUsed; uint64_t n, draws; };
++  struct Kind { uint32_t w, h, att, depth, colorLoad, depthLoad, depthUsed; uint64_t n, draws; double gpuNs; uint64_t timed; };
+ 
+   struct State {
+     int on = -1;
+@@ -23,6 +25,7 @@
+     bool pendingMain = false;
+     uint32_t pAtt = 0, pDepth = 0, pColorLoad = 0, pDepthLoad = 0;
+     uint64_t passes = 0, internal = 0, totalDraws = 0;
++    double internalNs = 0; uint64_t internalTimed = 0;
+     Kind kinds[48] = {};
+     int nKinds = 0;
+     std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+@@ -54,11 +57,19 @@
+     Logger::info(line);
+     for (int i = 0; i < s.nKinds; i++) {
+       const Kind& k = s.kinds[i];
+-      std::snprintf(line, sizeof line, "passlog:   %6.1f/s %4ux%-4u att %u depth %s%s color %s depth %s, %.1f draws/pass",
++      char gpu[64] = "";
++      if (k.timed) std::snprintf(gpu, sizeof gpu, ", GPU %.3f ms/pass = %.1f ms/s", k.gpuNs / k.timed / 1e6, k.gpuNs / k.timed * k.n / sec / 1e6);
++      std::snprintf(line, sizeof line, "passlog:   %6.1f/s %4ux%-4u att %u depth %s%s color %s depth %s, %.1f draws/pass%s",
+         k.n / sec, k.w, k.h, k.att, k.depth ? "yes" : "no", k.depth ? (k.depthUsed ? " (used)" : " (unused)") : "",
+-        op(k.colorLoad), k.depth ? op(k.depthLoad) : "-", k.n ? double(k.draws) / k.n : 0.0);
++        op(k.colorLoad), k.depth ? op(k.depthLoad) : "-", k.n ? double(k.draws) / k.n : 0.0, gpu);
+       Logger::info(line);
+     }
++    if (s.internalTimed) {
++      std::snprintf(line, sizeof line, "passlog:   internal passes: GPU %.3f ms/pass = %.1f ms/s",
++        s.internalNs / s.internalTimed / 1e6, s.internalNs / s.internalTimed * s.internal / sec / 1e6);
++      Logger::info(line);
++    }
++    s.internalNs = 0; s.internalTimed = 0;
+     s.passes = s.internal = s.totalDraws = 0;
+     s.nKinds = 0;
+     s.t0 = now;
+@@ -79,11 +90,26 @@
+     s.depthUsed |= depthUsed;
+   }
+ 
++  // DXVK_PASSSEQ=1: once, 20 s after the start, the next 24 passes in order (their pattern repeats each frame)
++  inline void sequence(const State& s) {
++    static int on = -1, left = 24;
++    static auto start = std::chrono::steady_clock::now();
++    if (on < 0) { const char* e = std::getenv("DXVK_PASSSEQ"); on = e && *e == '1'; }
++    if (!on || left <= 0 || std::chrono::steady_clock::now() - start < std::chrono::seconds(20)) return;
++    left--;
++    char line[200];
++    std::snprintf(line, sizeof line, "passseq: %s %ux%u att %u depth %s color %s depth %s, %u draws%s",
++      s.mainPass ? "pass" : "internal", s.w, s.h, s.att, s.depth ? "yes" : "no", op(s.colorLoad),
++      s.depth ? op(s.depthLoad) : "-", s.draws, s.depthUsed ? " (depth used)" : "");
++    Logger::info(line);
++  }
++
+   inline void end() {
+     if (!enabled()) return;
+     State& s = st();
+     if (!s.inPass) return;
+     s.inPass = false;
++    sequence(s);
+     if (!s.mainPass) { s.internal++; report(); return; }
+     s.passes++;
+     int i = 0;
+@@ -93,9 +119,66 @@
+        && k.depthLoad == s.depthLoad && k.depthUsed == uint32_t(s.depthUsed)) break;
+     }
+     if (i == s.nKinds && s.nKinds < 48)
+-      s.kinds[s.nKinds++] = Kind { s.w, s.h, s.att, s.depth, s.colorLoad, s.depthLoad, uint32_t(s.depthUsed), 0, 0 };
++      s.kinds[s.nKinds++] = Kind { s.w, s.h, s.att, s.depth, s.colorLoad, s.depthLoad, uint32_t(s.depthUsed), 0, 0, 0.0, 0 };
+     if (i < 48) { s.kinds[i].n++; s.kinds[i].draws += s.draws; }
+     report();
+   }
+ 
++
++  // DXVK_PASSTIME=1 (with DXVK_PASSLOG=1): each pass's GPU time, from a
++  // timestamp before and after it, read 1024 passes later (long done: no wait) and added to its kind in the report.
++  struct TimeSlot { uint32_t w, h, att, depth, colorLoad, depthLoad, main; bool used; };
++  struct Timer { VkQueryPool pool = VK_NULL_HANDLE; const vk::DeviceFn* vkd = nullptr; uint32_t next = 0, cur = ~0u; TimeSlot slots[1024] = {}; };
++  inline Timer& tm() { static Timer t; return t; }
++  inline float& period() { static float p = 1.0f; return p; }
++  inline bool timing() {
++    static int on = -1;
++    if (on < 0) { const char* e = std::getenv("DXVK_PASSTIME"); on = e && *e == '1'; }
++    // one thread only: the passes of the thread that times first (the CS thread); the swap chain's present runs on the
++    // game's thread with a context of its own, and two threads on one slot index crashed (index ~0u written)
++    static const std::thread::id owner = std::this_thread::get_id();
++    return on && enabled() && std::this_thread::get_id() == owner;
++  }
++  inline void addTime(const TimeSlot& t, double ns) {
++    State& s = st();
++    if (!t.main) { s.internalNs += ns; s.internalTimed++; return; }
++    for (int i = 0; i < s.nKinds; i++) {
++      Kind& k = s.kinds[i];
++      if (k.w == t.w && k.h == t.h && k.att == t.att && k.depth == t.depth && k.colorLoad == t.colorLoad && k.depthLoad == t.depthLoad) {
++        k.gpuNs += ns; k.timed++; return;
++      }
++    }
++  }
++  // before vkCmdBeginRenderPass: the query pair this pass uses (reset them, then the first timestamp); false: no timing
++  inline bool timeBegin(const vk::DeviceFn* vkd, VkQueryPool* pool, uint32_t* query) {
++    if (!timing()) return false;
++    Timer& t = tm();
++    if (!t.pool) {
++      VkQueryPoolCreateInfo ci = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
++      ci.queryType = VK_QUERY_TYPE_TIMESTAMP; ci.queryCount = 2048;
++      if (vkd->vkCreateQueryPool(vkd->device(), &ci, nullptr, &t.pool) != VK_SUCCESS) { t.pool = VK_NULL_HANDLE; return false; }
++      t.vkd = vkd;
++    }
++    uint32_t slot = t.next++ % 1024;
++    if (t.slots[slot].used) {
++      uint64_t ts[2] = {};
++      if (vkd->vkGetQueryPoolResults(vkd->device(), t.pool, 2 * slot, 2, sizeof ts, ts, sizeof ts[0], VK_QUERY_RESULT_64_BIT) == VK_SUCCESS && ts[1] > ts[0])
++        addTime(t.slots[slot], double(ts[1] - ts[0]) * period());
++      t.slots[slot].used = false;
++    }
++    t.cur = slot;
++    *pool = t.pool; *query = 2 * slot;
++    return true;
++  }
++  // after vkCmdEndRenderPass: the second timestamp, and what the pass was
++  inline bool timeEnd(VkQueryPool* pool, uint32_t* query) {
++    Timer& t = tm();
++    if (!timing() || !t.pool || t.cur == ~0u) return false;
++    State& s = st();
++    t.slots[t.cur] = TimeSlot { s.w, s.h, s.att, s.depth, s.colorLoad, s.depthLoad, uint32_t(s.mainPass), true };
++    *pool = t.pool; *query = 2 * t.cur + 1;
++    t.cur = ~0u;
++    return true;
++  }
++
+ }
+--- a/src/wsi/sdl2/wsi_presenter_sdl2.cpp
++++ b/src/wsi/sdl2/wsi_presenter_sdl2.cpp
+@@ -22,6 +22,12 @@
+ }
+ #endif
+ 
++#ifdef __ANDROID__
++#include <android/native_window.h>
++#include <cstdio>
++#include <cstdlib>
++#endif
++
+ namespace dxvk::wsi {
+ 
+   VkResult createSurface(
+\ No newline at end of file
+@@ -46,6 +52,14 @@
+       void* nw = nativeWindowOf(hWindow);
+       if (!nw)
+         return VK_ERROR_SURFACE_LOST_KHR;
++      // Port (Rayman Origins PC, Android): DXVK_HWC_SIZE=<w>x<h> (the runtime sets it to the game's resolution when
++      // its touch controls are on a layer of their own): the window's buffers at that size, so the display hardware
++      // enlarges the picture to the screen instead of the GPU's present blit. Galaxy Tab S6 Lite, 720 lines: 49.7 -> 56 fps.
++      if (const char* g = std::getenv("DXVK_HWC_SIZE")) {
++        int w = 0, h = 0;
++        if (std::sscanf(g, "%dx%d", &w, &h) == 2 && w > 0 && h > 0)
++          ANativeWindow_setBuffersGeometry(reinterpret_cast<ANativeWindow*>(nw), w, h, 0);
++      }
+       auto create = reinterpret_cast<PFN_CreateAndroidSurface>(vki->sym("vkCreateAndroidSurfaceKHR"));
+       if (!create)
+         return VK_ERROR_EXTENSION_NOT_PRESENT;
+\ No newline at end of file

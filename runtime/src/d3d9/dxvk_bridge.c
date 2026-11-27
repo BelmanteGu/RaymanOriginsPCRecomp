@@ -13,6 +13,7 @@
 #include <SDL3/SDL.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -57,6 +58,36 @@ int dxb_enabled(void) {
      * unused paths. DXVK_LEAN_SAMPLING=0 brings them back (tools/android/dxvk_mobile_lean.patch). */
     setenv("DXVK_LEAN_SAMPLING", "1", 0);
     setenv("DXVK_LEAN_FF", "1", 0);          /* no fog / alpha test / point sprites / clip planes: the game uses none */
+    /* barriers that wait for the fragment stage only (tools/android/dxvk_mobile_adreno_perf.patch):
+     * no vertex shader of the game samples an image (checked: all 18 of the title screen), and DXVK turns it off by
+     * itself if one ever does. DXVK_FRAG_BARRIERS=0 brings the full barriers back. */
+    setenv("DXVK_FRAG_BARRIERS", "1", 0);
+#ifdef __ANDROID__
+    {   /* the pipeline state cache in our data folder (it was written beside the game's files), and at the first start
+         * the one the APK carries (assets/rayman.dxvk-cache, made on a phone that played the game; none ships
+         * yet), so the pipelines are made while loading instead of hitching when each effect first shows.
+         * The player's own cache grows with play and is kept. */
+        extern char g_data_dir[1024];
+        if (!getenv("DXVK_STATE_CACHE_PATH")) setenv("DXVK_STATE_CACHE_PATH", g_data_dir, 1);
+        char dst[1100];
+        snprintf(dst, sizeof dst, "%s/app_process64.dxvk-cache", getenv("DXVK_STATE_CACHE_PATH"));
+        FILE *have = fopen(dst, "rb");
+        if (have) fclose(have);
+        else {
+            SDL_IOStream *in = SDL_IOFromFile("rayman.dxvk-cache", "rb");     /* an APK asset (SDL reads them on Android) */
+            FILE *out = in ? fopen(dst, "wb") : NULL;
+            size_t total = 0;
+            if (in && out) {
+                char buf[65536];
+                size_t n;
+                while ((n = SDL_ReadIO(in, buf, sizeof buf)) > 0) { fwrite(buf, 1, n, out); total += n; }
+            }
+            if (out) fclose(out);
+            if (in) SDL_CloseIO(in);
+            fprintf(stderr, "usf: dxvk state cache: %s\n", total ? "the APK's copied in" : "none yet (made while playing)");
+        }
+    }
+#endif
     /* the game asks for immediate presentation and runs as fast as it can (uneven 40-90 fps on a fast GPU). Vsync is
      * no cure on a 144 Hz panel (60 does not divide 144: frames alternate 14 and 21 ms), so DXVK's frame limiter
      * paces the frames to USF_FPS (default 60; 0 = uncapped), presenting without waiting for the vblank (on Wayland
@@ -393,6 +424,24 @@ static uint32_t dispatch(CPU *c, uint32_t a, int slot) {
     case 81: dxl_flush_draw(0, ARG(1), 0, ARG(2), 0, 0, ARG(3)); break;
     case 82: dxl_flush_draw(1, ARG(1), (int32_t)ARG(2), ARG(3), ARG(4), ARG(5), ARG(6)); break;
     case 85: for (int k = 0; k < 16; k++) { Wrap *v = dxb_of(stream_buf[k]); if (v) dxl_flush_range(v, 0, v->shadow_size); } break;
+    }
+    if (w->type == DXB_DEVICE && (slot == 47 || slot == 34) && getenv("USF_DXB_CALLER")) {
+        /* (analysis) USF_DXB_CALLER=1: who in the game calls SetViewport / StretchRect: the return address and the
+         * .text addresses further up the guest stack (the callers' return addresses, a heuristic), once per caller */
+        static uint32_t seen[32]; static int ns;
+        uint32_t ret = R32(a - 4u), k = 0;
+        if (slot == 47) ret ^= R32(ARG(1) + 12u) << 20;          /* a new height from the same caller is new too */
+        while ((int)k < ns && seen[k] != ret) k++;
+        if ((int)k == ns && ns < 32) {
+            seen[ns++] = ret;
+            char up[256] = ""; size_t n = 0;
+            for (uint32_t q = a, found = 0; q < a + 0x400u && found < 8; q += 4) {
+                uint32_t v = R32(q);
+                if (v > 0x401000u && v < 0x9c5000u) { n += (size_t)snprintf(up + n, sizeof up - n, " %08x", v); found++; }
+            }
+            if (slot == 47) { uint32_t vp = ARG(1); fprintf(stderr, "usf: caller SetViewport %u,%u %ux%u from %08x (frame %u); up:%s\n", R32(vp), R32(vp + 4), R32(vp + 8), R32(vp + 12), R32(a - 4u), g_dev.frames, up); }
+            else fprintf(stderr, "usf: caller StretchRect from %08x; up:%s\n", ret, up);
+        }
     }
     if (w->type == DXB_DEVICE && dsw.rtlog) {   /* (analysis) render targets the game makes */
         if (slot == 23 && (ARG(4) & 3u))

@@ -1,0 +1,31 @@
+Port (Rayman Origins PC, Android): no centroid interpolation of ps_1_x/ps_2_x colour inputs (D3D9's rule, which only
+matters with MSAA). Measured on the Galaxy Tab S6 Lite (Adreno 618, Qualcomm driver) with tools/android/vkbench:
+14 blended textured layers at 1280x720, 9.43 ms a frame with a centroid colour input, 3.52 ms without (2.7x a pixel).
+The game's sprite shaders are ps_2_0 (texld * v0). DXVK_CENTROID=1 brings the centroid back. Apply after the others.
+
+diff --git a/src/dxso/dxso_compiler.cpp b/src/dxso/dxso_compiler.cpp
+index f7bd312..4334cc9 100644
+--- a/src/dxso/dxso_compiler.cpp
++++ b/src/dxso/dxso_compiler.cpp
+@@ -12,6 +12,7 @@
+ #include "../dxvk/dxvk_spec_const.h"
+ 
+ #include <cfloat>
++#include <cstdlib>
+ 
+ namespace dxvk {
+ 
+@@ -636,7 +637,12 @@ namespace dxvk {
+     const bool pixel  = m_programInfo.type() == DxsoProgramTypes::PixelShader;
+     const bool vertex = !pixel;
+ 
+-    if (pixel && input && semantic.usage == DxsoUsage::Color && m_programInfo.majorVersion() < 3)
++    // Port (Rayman Origins PC, Android): D3D9 interpolates ps_1_x/ps_2_x colour inputs at the centroid, which only
++    // differs from the pixel centre with MSAA. On the Galaxy Tab S6 Lite (Adreno 618, Qualcomm driver) a centroid
++    // input made each blended, textured pixel 2.7x slower without MSAA (tools/android/vkbench: 14 layers at 1280x720,
++    // 9.43 ms centroid, 3.52 ms not); the game's sprites are ps_2_0 (texld * v0). DXVK_CENTROID=1 brings it back.
++    static const bool s_centroid = [] { const char* e = std::getenv("DXVK_CENTROID"); return e && *e == '1'; }();
++    if (s_centroid && pixel && input && semantic.usage == DxsoUsage::Color && m_programInfo.majorVersion() < 3)
+       centroid = true;
+ 
+     uint32_t slot = 0;
